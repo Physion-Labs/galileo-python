@@ -115,10 +115,12 @@ CASES = [
 def main() -> int:
     print(f"Contract: openapi/galileo-v1.yaml\nAgainst:  {BASE_URL}\n")
     failures = 0
+    skipped = 0
     with httpx.Client() as client:
         for path, schema, auth in CASES:
             if auth and not API_KEY:
-                print(f"  ~ {path}  skipped (no GALILEO_API_KEY)")
+                print(f"  ~ {path}  SKIPPED (no GALILEO_API_KEY)")
+                skipped += 1
                 continue
             try:
                 body = get(client, path, auth=auth)
@@ -160,10 +162,23 @@ def main() -> int:
             except Exception as exc:
                 print(f"  ! could not sample evaluations: {exc}")
 
-    print("" if failures else "\nThe contract matches the live service.")
+    # A check that says "verified" when it verified almost nothing is worse than
+    # no check: it turns an unverified contract into a green tick. Only one of
+    # these cases needs no credential, so without a key this has looked at the
+    # simplest endpoint in the API and nothing else.
     if failures:
         print(f"\n{failures} mismatch(es).")
-    return 1 if failures else 0
+        return 1
+    if skipped:
+        print(
+            f"\nINCOMPLETE — {len(CASES) - skipped} of {len(CASES)} endpoints checked, "
+            f"{skipped} skipped for want of GALILEO_API_KEY.\n"
+            "The endpoints carrying the interesting half of the contract "
+            "(evaluations, models, quota) were NOT verified."
+        )
+        return 2
+    print("\nThe contract matches the live service.")
+    return 0
 
 
 if __name__ == "__main__":

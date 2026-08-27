@@ -61,4 +61,34 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --frozen
-      - run: uv run python scripts/verify_live.py
+
+      # Named at the JOB level so a missing key is visible in the run list rather
+      # than only in a log nobody opens. Without it the only endpoint this can
+      # reach is /v1/status, and a green tick would then mean "the simplest
+      # endpoint in the API still answers" while reading as "the contract holds".
+      - name: Is there a key to verify with?
+        env:
+          GALILEO_API_KEY: ${{ secrets.GALILEO_CI_API_KEY }}
+        run: |
+          if [ -z "$GALILEO_API_KEY" ]; then
+            echo "::warning title=Live verification incomplete::GALILEO_CI_API_KEY is not set.           Only /v1/status will be checked; evaluations, models and quota will not."
+          fi
+
+      # Exit 2 is this script's "INCOMPLETE" — endpoints skipped for want of a
+      # key. Distinguished from exit 1, a real mismatch, because the two mean
+      # opposite things about the contract and only one is a finding.
+      - name: Contract against the live service
+        env:
+          GALILEO_API_KEY: ${{ secrets.GALILEO_CI_API_KEY }}
+          GALILEO_BASE_URL: https://api-dev.physionlabs.ai
+        run: |
+          set +e
+          uv run python scripts/verify_live.py
+          code=$?
+          set -e
+          case "$code" in
+            0) echo "::notice title=Contract verified::Every endpoint matched." ;;
+            2) echo "::warning title=Contract NOT verified::Skipped for want of GALILEO_CI_API_KEY." ;;
+            *) echo "::error title=Contract mismatch::The live service does not match the contract."
+               exit 1 ;;
+          esac

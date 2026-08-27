@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 
 from .._poll import poll_until
 from .._transport import Transport
-from ..models import Evaluation, EvaluationList
+from ..models import Evaluation, EvaluationCounts, EvaluationList
 
 # An evaluation stops changing at one of these.
 #
@@ -48,7 +48,28 @@ class Evaluations:
         if metadata is not None:
             body["metadata"] = dict(metadata)
         return Evaluation.model_validate(
-            self._t.json(method="POST", path="/v1/evaluations", body=body)
+            self._t.json(
+                method="POST",
+                path="/v1/evaluations",
+                body=body,
+                # NEVER RETRIED, and this is the single most expensive default in
+                # the client to get wrong.
+                #
+                # Submission is not idempotent: the API has no idempotency key,
+                # and repeating the same (video, prompt, model, detectors) files a
+                # SECOND run with its own id and its own charge. So every failure
+                # that leaves the outcome unknown -- a 500, a reset connection, a
+                # timeout -- is one where the run may already exist and already be
+                # paid for. Retrying does not recover the request; it buys the same
+                # evaluation twice, and the caller cannot tell, because the first
+                # response never arrived.
+                #
+                # A 429 still waits: that is the server declining to create
+                # anything, which is knowledge rather than ambiguity. `retry()`
+                # below also keeps its retries -- it is idempotent on the run being
+                # retried.
+                max_retries=0,
+            )
         )
 
     def retrieve(self, evaluation_id: str) -> Evaluation:
@@ -56,14 +77,94 @@ class Evaluations:
             self._t.json(method="GET", path=f"/v1/evaluations/{evaluation_id}")
         )
 
-    def list(self, *, limit: int | None = None, video_id: str | None = None) -> EvaluationList:
-        """Your evaluations, newest first."""
+    def list(
+        self,
+        *,
+        limit: int | None = None,
+        offset: int | None = None,
+        video_id: str | None = None,
+        status: Sequence[str] | None = None,
+    ) -> EvaluationList:
+        """Your evaluations, newest first.
+
+        ``offset`` addresses a page directly, and the response's ``counts`` is
+        what tells you when to stop: ``limit`` caps one response at 100, so
+        deciding you have reached the end because a page came back short is wrong
+        at exactly the boundary where it matters.
+
+        ``status`` is sent comma-joined, which the API accepts.
+        """
         return EvaluationList.model_validate(
             self._t.json(
                 method="GET",
                 path="/v1/evaluations",
-                params={"limit": limit, "video_id": video_id},
+                params={
+                    "limit": limit,
+                    "offset": offset,
+                    "video_id": video_id,
+                    # An empty sequence means "no filter", not "keep nothing" --
+                    # a caller building this from checkboxes hits that.
+                    "status": ",".join(status) if status else None,
+                },
             )
+        )
+
+    def iterate(
+        self,
+        *,
+        page_size: int = 100,
+        video_id: str | None = None,
+        status: Sequence[str] | None = None,
+    ) -> Iterator[Evaluation]:
+        """Walk every page, so a caller does not hold the offset arithmetic.
+
+        Stops on ``counts`` rather than on a short page. Yields one evaluation at
+        a time: a large account is the case this exists for, and materialising it
+        into one list would undo the point.
+        """
+        limit = min(100, max(1, page_size))
+        offset = 0
+        while True:
+            page = self.list(limit=limit, offset=offset, video_id=video_id, status=status)
+            yield from page.data
+
+            # `counts` is a census over the owner and video scope that IGNORES
+            # `status`. Summing all of it while filtering would walk past the end
+            # of the filtered set, asking for pages that come back empty -- so the
+            # statuses asked for are selected out of it.
+            #
+            # Absent (an older deployment) falls back to the short-page test,
+            # which is why that is not the primary rule: it cannot tell a final
+            # full page from a penultimate one.
+            total = _count_for(page.counts, status) if page.counts else None
+            offset += len(page.data)
+            if not page.data:
+                return
+            if total is not None:
+                if offset >= total:
+                    return
+            elif len(page.data) < limit:
+                return
+
+    def retry(self, evaluation_id: str) -> Evaluation:
+        """Run a failed evaluation again. Returns the NEW evaluation, queued.
+
+        The only idempotent submission in this API, and it is idempotent on the
+        run being retried rather than on your request: press it in a burst and
+        every caller is handed the same successor. :meth:`create` has no such
+        guarantee, so this is the safe way to react to a failure.
+
+        It costs the ordinary price, which is not paying twice -- the failed run
+        was refunded when it settled, and whichever detectors did land were
+        cached, so only the missing ones are bought again.
+
+        Raises :class:`InvalidRequestError` when there is nothing to retry: the
+        run has not finished, it did not fail, it delivered everything asked of
+        it, it analyzed no stored clip, it has been attempted too many times, or
+        its earlier retry was deleted. The message says which.
+        """
+        return Evaluation.model_validate(
+            self._t.json(method="POST", path=f"/v1/evaluations/{evaluation_id}/retry")
         )
 
     def delete(self, evaluation_id: str) -> None:
@@ -85,3 +186,21 @@ class Evaluations:
         if queued.status.value in SETTLED:
             return queued
         return self.wait_until_settled(queued.id, timeout=timeout)
+
+
+def _count_for(counts: EvaluationCounts, status: Sequence[str] | None) -> int:
+    """How many evaluations the census covers, restricted to the statuses asked for.
+
+    ``counts`` ignores ``status`` by design: one census answers both "how much is
+    there" and "how many pages does this filter have", and the second question is
+    this function.
+
+    A status the census does not mention contributes 0 rather than raising -- a
+    deployment that adds a status this client has not heard of should not break
+    paging for a client that is not asking for it.
+    """
+    census: dict[str, int] = {
+        k: v for k, v in counts.model_dump().items() if isinstance(v, int)
+    }
+    keys = list(status) if status else list(census)
+    return sum(census.get(k, 0) for k in keys)

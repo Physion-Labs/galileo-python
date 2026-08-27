@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from enum import Enum
 from pydantic import BaseModel, ConfigDict, Field, RootModel
-from typing import Any, Literal
+from typing import Any, Dict, Literal
 
 
 class ModelId(Enum):
@@ -365,11 +365,43 @@ class Evaluation(BaseModel):
     """
     Stored video identifier when the evaluation used an uploaded video.
     """
+    attempt: int | None = None
+    """
+    Which try this is. 1 for a run submitted directly; 2 or more for one produced by `POST /v1/evaluations/{evaluation_id}/retry`. There is a ceiling, so a clip that keeps failing under the same instructions stops being retryable rather than being retried forever.
+    """
+    retry_of: str | None = None
+    """
+    The failed evaluation this one was filed to replace, if any.
+    """
+    retried_by: str | None = None
+    """
+    The evaluation filed to replace this one, if it has been retried.
+    Set at most once, which is what makes retrying idempotent: a burst of presses claims this field exactly once, and every press that loses the race is handed the winner.
+    """
     metadata: dict[str, Any] | None = None
     """
     Whatever you passed on create, echoed back. NULL when you passed nothing -- the key is always present, its value says whether there was any.
     Only found by submitting through the API. Every evaluation created in the console carries metadata, so a contract checked against console traffic alone looked correct here.
     """
+
+
+class EvaluationCounts(BaseModel):
+    """
+    How many evaluations exist in each status, over the same owner and video scope as the request and deliberately IGNORING `limit`, `offset` and `status`.
+    This is what a pager needs. Inferring the end of a list from "was the page full" is wrong at exactly the boundary paging exists to make honest, and a bare total could not tell you the page count for a filtered view.
+    """
+
+    model_config = ConfigDict(
+        extra='allow',
+    )
+    __annotations__ = {
+        '__pydantic_extra__': Dict[str, int],
+    }
+    queued: int | None = None
+    processing: int | None = None
+    completed: int | None = None
+    partial: int | None = None
+    failed: int | None = None
 
 
 class EvaluationList(BaseModel):
@@ -378,6 +410,7 @@ class EvaluationList(BaseModel):
     )
     object: Literal['list']
     data: list[Evaluation]
+    counts: EvaluationCounts | None = None
 
 
 class RateLimitWindow(BaseModel):
@@ -432,7 +465,11 @@ class ModelBuild(BaseModel):
     )
     id: ModelId
     label: str
-    version: str
+    version: str | None
+    """
+    The build the model runs, or NULL when that is not ours to state.
+    Null is the current answer for `galileo` and will stay so while it is the default: the version belongs to the cluster serving it, and answering from our side would mean publishing a number nobody checked. Nothing keys a run on this -- an evaluation carries its own `model_version`, taken from the submission that resolved it, and that is the one to read.
+    """
     note: str | None = None
 
 
@@ -452,7 +489,11 @@ class Model(BaseModel):
     )
     id: ModelId
     object: Literal['model']
-    version: str
+    version: str | None
+    """
+    The build the model runs, or NULL when that is not ours to state.
+    Null is the current answer for `galileo` and will stay so while it is the default: the version belongs to the cluster serving it, and answering from our side would mean publishing a number nobody checked. Nothing keys a run on this -- an evaluation carries its own `model_version`, taken from the submission that resolved it, and that is the one to read.
+    """
     detectors: list[GlitchType]
     input: Input1
 
@@ -463,7 +504,10 @@ class ModelList(BaseModel):
     )
     object: Literal['list']
     builds: list[ModelBuild]
-    default_build: str
+    default_build: str | None
+    """
+    The build an evaluation gets when it names no `model_version`, or NULL when that is the cluster's to state — see `Model.version`. Describes the deployment; it is not what a run is filed under.
+    """
     data: list[Model]
 
 

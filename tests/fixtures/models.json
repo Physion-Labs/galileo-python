@@ -4,22 +4,22 @@
     {
       "id": "gemini",
       "label": "Gemini",
-      "version": "gemini-3.1-pro-preview",
+      "version": "0.1.0",
       "note": "Gemini 3.1 Pro through PhysionAPI \u2014 a baseline, not a trained model"
     },
     {
       "id": "galileo",
       "label": "Galileo",
-      "version": "0.1",
+      "version": null,
       "note": "Our own model, served on the GPU cluster"
     }
   ],
-  "default_build": "0.1",
+  "default_build": null,
   "data": [
     {
       "id": "galileo",
       "object": "model",
-      "version": "0.1",
+      "version": null,
       "detectors": [
         "visual_glitch",
         "prompt_misalignment"
