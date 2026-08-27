@@ -20,9 +20,41 @@ evaluation = galileo.evaluations.create_and_wait(
     video={"url": "https://cdn.example.com/red-ball.mp4"},
 )
 
-for finding in evaluation.result.glitches:
-    print(finding.type, finding.description)
+# `result` is None on a failed run, so it is worth branching rather than
+# reaching straight in — a failed evaluation is an outcome, not an exception.
+if evaluation.status.value == "failed":
+    print("failed:", evaluation.error.message if evaluation.error else "no reason given")
+else:
+    for finding in (evaluation.result.glitches if evaluation.result else []):
+        print(finding.type.value, finding.description)
 ```
+
+`partial` is also terminal and DOES carry a result: one detector finished and
+another did not, and `detectors` says which of them to trust. A caller waiting
+for `completed` alone waits forever.
+
+Uploading a local file instead of pointing at a URL — three calls behind one,
+and the bytes are streamed rather than held in memory:
+
+```python
+video = galileo.videos.upload("./clip.mp4")
+evaluation = galileo.evaluations.create_and_wait(
+    prompt="A red ball rolls off a table and bounces twice.",
+    video={"upload_id": video.id},
+)
+```
+
+Walking a large account, and retrying what failed:
+
+```python
+for ev in galileo.evaluations.iterate(status=["failed"]):
+    nxt = galileo.evaluations.retry(ev.id)   # idempotent, unlike create
+    print(ev.id, "->", nxt.id)
+```
+
+`retry()` is the only idempotent submission in this API: press it in a burst and
+every caller is handed the same successor. `create()` is not, which is why this
+client never retries it — see the note in `resources/evaluations.py`.
 
 ## The contract
 

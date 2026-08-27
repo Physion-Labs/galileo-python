@@ -1,0 +1,25 @@
+# Security updates are enabled through the repository setting (they need no
+# config). This file is the VERSION updates — the routine bumps — kept weekly and
+# grouped, because a public SDK with two ecosystems otherwise files a pull
+# request a day and the security ones get lost among them.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # httpx and pydantic are the only RUNTIME dependencies, so they are worth
+      # seeing on their own — a bump there changes what a consumer resolves.
+      runtime:
+        patterns: ["httpx", "pydantic"]
+      dev:
+        patterns: ["*"]
+        exclude-patterns: ["httpx", "pydantic"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

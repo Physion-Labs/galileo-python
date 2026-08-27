@@ -1,0 +1,94 @@
+name: publish
+
+# DISABLED ON PURPOSE. There is no `push` or `release` trigger: the only way to
+# run this is to dispatch it by hand and type the version, which is the state the
+# review asked for while the release blockers were open.
+#
+# Turning it on later means adding a `release: [published]` trigger. Do that in
+# the same change that removes the guard below, so the two cannot disagree.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The version to publish. Must match pyproject.toml exactly.
+        required: true
+      i_have_verified_the_live_contract:
+        description: >-
+          Type "yes" only if scripts/verify_live.py has been run against a real
+          deployment WITH a key and reported no mismatches. Its exit code 2 —
+          "INCOMPLETE" — is not a pass.
+        required: true
+
+permissions:
+  contents: read
+  # PyPI trusted publishing: the index trusts THIS workflow rather than an API
+  # token, and mints the credential from an OIDC exchange. Nothing long-lived
+  # exists to leak or rotate.
+  #
+  # PyPI also accepts a PENDING publisher — configured for a name that does not
+  # exist yet — so unlike npm this needs no token even for the FIRST upload.
+  # Configure it at pypi.org/manage/account/publishing before dispatching:
+  #   project physionlabs · owner Physion-Labs · repo galileo-python
+  #   workflow publish.yml · environment pypi-publish
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi-publish # a second gate: approvals live on the environment
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Refuse unless the dispatcher confirmed the live check
+        env:
+          CONFIRMED: ${{ inputs.i_have_verified_the_live_contract }}
+        run: |
+          if [ "$CONFIRMED" != "yes" ]; then
+            echo "::error::A published version cannot be unpublished. Run scripts/verify_live.py with a key first."
+            exit 1
+          fi
+
+      - name: The version typed must match what pyproject says
+        env:
+          WANT: ${{ inputs.version }}
+        run: |
+          have=$(python -c "import tomllib,pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          if [ "$have" != "$WANT" ]; then
+            echo "::error::pyproject.toml is $have, you asked to publish $WANT."
+            exit 1
+          fi
+
+      - run: uv sync --frozen
+      # Everything the required CI does, again, here — a publish that skipped it
+      # because "CI was green on the branch" is a publish of a different tree.
+      - run: uv run python scripts/check_contract.py
+      - run: uv run mypy
+      - run: uv run pytest
+
+      - run: uv build
+      # The wheel has to carry the marker and the license, or the install is
+      # missing a file its own metadata names. tests/test_packaging.py checks what
+      # pyproject DECLARES; this checks what was built.
+      - name: The wheel carries the marker and the license
+        run: |
+          python - <<'PY'
+          import glob, zipfile
+          wheel = glob.glob("dist/*.whl")[0]
+          names = set(zipfile.ZipFile(wheel).namelist())
+          missing = {n for n in (
+              "physionlabs/py.typed",
+              "physionlabs-0.1.0.dist-info/licenses/LICENSE",
+              "physionlabs-0.1.0.dist-info/licenses/NOTICE",
+          ) if n not in names}
+          assert not missing, f"{wheel} is missing {sorted(missing)}"
+          leaked = [n for n in names if n.startswith(("tests/", "scripts/", "openapi/"))]
+          assert not leaked, f"{wheel} ships {leaked}"
+          PY
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # No password: the OIDC exchange above is the credential.
+          attestations: true

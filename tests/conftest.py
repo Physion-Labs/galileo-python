@@ -61,7 +61,10 @@ def client_factory():
 
     made: list[Galileo] = []
 
-    def build(recorder: Recorder, **kw: Any) -> Galileo:
+    def build(recorder: Any, **kw: Any) -> Galileo:
+        # A bare handler is accepted alongside a Recorder, so a test that needs to
+        # RAISE (a connection failure has no response to script) can pass a
+        # function instead of pretending it is a queue of replies.
         http = httpx.Client(transport=httpx.MockTransport(recorder))
         galileo = Galileo(
             api_key="gk_live_test",

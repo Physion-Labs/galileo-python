@@ -40,6 +40,7 @@ class Transport:
         timeout: float = 60.0,
         max_retries: int = 2,
         rate_limit_budget: float = 60.0,
+        max_rate_limit_retries: int = 20,
         max_concurrency: int = 4,
         client: httpx.Client | None = None,
     ) -> None:
@@ -53,6 +54,13 @@ class Transport:
         # against a limit that admits two a minute and the last must wait minutes,
         # which no sane retry count covers.
         self._rate_limit_budget = rate_limit_budget
+        # A budget measured in SLEEP bounds nothing when the sleeps are zero.
+        # `Retry-After: 0` is a legal answer -- and a proxy or a misconfigured
+        # limiter can give it indefinitely -- so a loop guarded only by the budget
+        # spins as fast as the network allows, forever, even at budget 0. Two
+        # further bounds close that: this count, and a wall-clock deadline taken
+        # before the first attempt.
+        self._max_rate_limit_retries = max_rate_limit_retries
         # Python has no ambient limit either. A ThreadPoolExecutor over two
         # hundred clips otherwise opens two hundred requests, most of which come
         # straight back 429 and spend the budget above on requests that were never
@@ -126,7 +134,9 @@ class Transport:
         retries: int,
     ) -> httpx.Response:
         rate_limit_spent = 0.0
+        rate_limited = 0
         attempt = 0
+        rate_limit_deadline = time.monotonic() + self._rate_limit_budget
 
         while True:
             try:
@@ -156,9 +166,19 @@ class Transport:
                 wait = retry_after_seconds(response.headers)
                 if wait is None:
                     wait = _backoff(attempt + 1)
-                if rate_limit_spent + wait <= self._rate_limit_budget:
+                # Three bounds, each closing a hole the others leave open:
+                #   * the count stops a `Retry-After: 0` loop, where no time goes;
+                #   * the deadline stops many small waits adding up past the
+                #     budget in wall-clock terms;
+                #   * the budget stops one enormous `Retry-After` being honoured.
+                within_count = rate_limited < self._max_rate_limit_retries
+                within_deadline = time.monotonic() + wait <= rate_limit_deadline
+                within_budget = rate_limit_spent + wait <= self._rate_limit_budget
+                if within_count and within_deadline and within_budget:
+                    rate_limited += 1
                     rate_limit_spent += wait
-                    time.sleep(wait)
+                    if wait > 0:
+                        time.sleep(wait)
                     continue
                 raise error_from_response(response)
 

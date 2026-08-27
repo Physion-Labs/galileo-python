@@ -35,6 +35,7 @@ class Galileo:
         timeout: float = 60.0,
         max_retries: int = 2,
         rate_limit_budget: float = 60.0,
+        max_rate_limit_retries: int = 20,
         max_concurrency: int = 4,
         http_client: httpx.Client | None = None,
     ) -> None:
@@ -51,6 +52,7 @@ class Galileo:
             timeout=timeout,
             max_retries=max_retries,
             rate_limit_budget=rate_limit_budget,
+            max_rate_limit_retries=max_rate_limit_retries,
             max_concurrency=max_concurrency,
             client=http_client,
         )
