@@ -356,7 +356,12 @@ class Evaluation(BaseModel):
     input: Input
     usage: EvaluationUsage
     result: EvaluationResult | None
-    error: EvaluationFailure | None
+    error: EvaluationFailure | None = None
+    """
+    Why the run failed, on a `failed` one. NULL on a run that did not fail, and ABSENT on rows written before this field existed.
+    Not in `required`, and that is a correction rather than a preference: it was, and the older rows in the store do not carry the key at all. A client that enforced the contract at runtime — the Python one does, since its models validate — raised on any page deep enough to reach them, while the TypeScript client passed because its types are erased before a response is ever seen. So the contract was not merely wrong, it was wrong in a way that only one of the two clients could report.
+    Test for a VALUE, not for the key.
+    """
     detectors: list[DetectorState] | None = None
     """
     Per-detector state. Older evaluations may omit this field.
