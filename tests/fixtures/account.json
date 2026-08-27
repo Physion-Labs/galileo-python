@@ -1,0 +1,33 @@
+{
+  "object": "user",
+  "id": "user_EXAMPLE",
+  "email": "someone@example.com",
+  "name": "Example Name",
+  "tier": "free",
+  "credits": 9398,
+  "unlimited": false,
+  "limits": {
+    "requests_per_min": 5,
+    "window_sec": 60,
+    "max_concurrent_jobs": 4,
+    "rate_limits": {
+      "detect": {
+        "max": 5,
+        "window_sec": 60
+      },
+      "generate": {
+        "max": 8,
+        "window_sec": 60
+      },
+      "upload": {
+        "max": 10,
+        "window_sec": 60
+      }
+    }
+  },
+  "api_key": {
+    "name": "Default",
+    "prefix": "gk_live_xxxx",
+    "last4": "xxxx"
+  }
+}

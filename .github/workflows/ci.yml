@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv python install ${{ matrix.python }}
+      - run: uv sync --frozen
+      # Fails if the contract copy was edited here instead of upstream, or if the
+      # committed models are not what the contract generates.
+      - run: uv run python scripts/check_contract.py
+      - run: uv run mypy
+      - run: uv run pytest
+
+      # tests/test_packaging.py checks what pyproject DECLARES; this checks what
+      # the wheel actually contains. The two differ in exactly the way that
+      # matters: a declaration can be right while the build leaves the file out,
+      # and nobody finds out until an install is missing py.typed and every
+      # annotation in the package is silently ignored.
+      - name: The wheel carries the marker and the license
+        run: |
+          uv build --wheel
+          python - <<'PY'
+          import glob, zipfile
+          wheel = glob.glob("dist/*.whl")[0]
+          names = set(zipfile.ZipFile(wheel).namelist())
+          required = {
+              "physionlabs/py.typed",
+              "physionlabs-0.1.0.dist-info/licenses/LICENSE",
+              "physionlabs-0.1.0.dist-info/licenses/NOTICE",
+          }
+          missing = required - names
+          assert not missing, f"{wheel} is missing {sorted(missing)}"
+          leaked = [n for n in names if n.startswith(("tests/", "scripts/", "openapi/"))]
+          assert not leaked, f"{wheel} ships {leaked}"
+          print(f"{wheel}: {len(names)} entries, marker and license present")
+          PY
+
+  # Talks to the development deployment. Deliberately NOT required: it fails when
+  # that deployment is down or mid-rollout, which is not the pull request's fault
+  # — but it is the only check that would notice the API drifting away from the
+  # contract, so it runs on every change and is read rather than gated on.
+  live:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run python scripts/verify_live.py

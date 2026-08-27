@@ -1,0 +1,22 @@
+{
+  "state": "operational",
+  "checked_at": 1787809828,
+  "components": [
+    {
+      "key": "api",
+      "name": "API",
+      "description": "Glitch-detection evaluation API.",
+      "state": "operational",
+      "detail": "Glitch-detection evaluation API.",
+      "latency_ms": 4
+    },
+    {
+      "key": "console",
+      "name": "Console",
+      "description": "Playground, API keys, and dashboard.",
+      "state": "operational",
+      "detail": "Playground, API keys, and dashboard.",
+      "latency_ms": 1
+    }
+  ]
+}

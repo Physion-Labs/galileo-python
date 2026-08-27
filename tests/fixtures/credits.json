@@ -1,0 +1,16 @@
+{
+  "credits": 9398,
+  "pricing": {
+    "minimum": 1,
+    "cache_hit_rate": 1,
+    "assumed_duration_sec": 15,
+    "per_second_by_detector": {
+      "visual_glitch": 7.6,
+      "prompt_misalignment": 3
+    },
+    "generation_from_catalog": true,
+    "per_second_per_detector": 7.6
+  },
+  "unlimited": false,
+  "per_generated_sec": 1
+}

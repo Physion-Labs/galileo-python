@@ -1,0 +1,38 @@
+{
+  "limit": 5,
+  "used": 0,
+  "remaining": 5,
+  "reset_at": null,
+  "reset_in_sec": null,
+  "window_sec": 60,
+  "unlimited": false,
+  "scopes": {
+    "detect": {
+      "limit": 5,
+      "used": 0,
+      "remaining": 5,
+      "reset_at": null,
+      "reset_in_sec": null,
+      "window_sec": 60,
+      "unlimited": false
+    },
+    "generate": {
+      "limit": 8,
+      "used": 0,
+      "remaining": 8,
+      "reset_at": null,
+      "reset_in_sec": null,
+      "window_sec": 60,
+      "unlimited": false
+    },
+    "upload": {
+      "limit": 10,
+      "used": 0,
+      "remaining": 10,
+      "reset_at": null,
+      "reset_in_sec": null,
+      "window_sec": 60,
+      "unlimited": false
+    }
+  }
+}

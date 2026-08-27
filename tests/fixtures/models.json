@@ -1,0 +1,41 @@
+{
+  "object": "list",
+  "builds": [
+    {
+      "id": "gemini",
+      "label": "Gemini",
+      "version": "gemini-3.1-pro-preview",
+      "note": "Gemini 3.1 Pro through PhysionAPI \u2014 a baseline, not a trained model"
+    },
+    {
+      "id": "galileo",
+      "label": "Galileo",
+      "version": "0.1",
+      "note": "Our own model, served on the GPU cluster"
+    }
+  ],
+  "default_build": "0.1",
+  "data": [
+    {
+      "id": "galileo",
+      "object": "model",
+      "version": "0.1",
+      "detectors": [
+        "visual_glitch",
+        "prompt_misalignment"
+      ],
+      "input": {
+        "formats": [
+          "video/mp4 (H.264/AVC)"
+        ],
+        "max_duration_sec": 15,
+        "max_file_bytes": 52428800,
+        "aspect_ratios": [
+          "16:9",
+          "9:16",
+          "1:1"
+        ]
+      }
+    }
+  ]
+}
