@@ -180,9 +180,37 @@ class Evaluations:
             timeout=timeout,
         )
 
-    def create_and_wait(self, *, timeout: float = 600.0, **params: Any) -> Evaluation:
-        """Submit and wait. What most callers want."""
-        queued = self.create(**params)
+    def create_and_wait(
+        self,
+        *,
+        video: Mapping[str, Any],
+        prompt: str | None = None,
+        model: str | None = None,
+        model_version: str | None = None,
+        glitch_types: Sequence[str] | None = None,
+        metadata: Mapping[str, Any] | None = None,
+        timeout: float = 600.0,
+    ) -> Evaluation:
+        """Submit and wait. What most callers want.
+
+        The parameters are SPELLED OUT rather than forwarded as ``**params``, and
+        that is the difference between a typed call and an untyped one. This is
+        the method every quickstart uses; with ``**params`` an editor could not
+        complete it, mypy could not check it, and ``inspect.signature`` reported
+        nothing a caller could act on. The mistake was only reported at runtime,
+        by ``create()``, one frame further in than where it was made.
+
+        The TypeScript client has always had this — its `params` argument is a
+        typed object — so this is also the two clients agreeing.
+        """
+        queued = self.create(
+            video=video,
+            prompt=prompt,
+            model=model,
+            model_version=model_version,
+            glitch_types=glitch_types,
+            metadata=metadata,
+        )
         if queued.status.value in SETTLED:
             return queued
         return self.wait_until_settled(queued.id, timeout=timeout)

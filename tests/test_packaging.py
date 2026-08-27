@@ -98,3 +98,31 @@ def test_the_public_surface_is_explicit():
     assert physionlabs.__version__ == PYPROJECT["project"]["version"]
     for name in physionlabs.__all__:
         assert hasattr(physionlabs, name), f"__all__ names {name}, which does not exist"
+
+
+def test_the_submit_methods_name_their_parameters():
+    """No `**kwargs` on the calls a quickstart uses.
+
+    `create_and_wait` forwarded everything as `**params`, which is the difference
+    between a typed call and an untyped one on the most-used method in the
+    library: an editor could not complete it, mypy could not check it, and
+    `inspect.signature` reported nothing a caller could act on. A typo surfaced at
+    runtime from `create()`, one frame in from where it was made.
+
+    Asserted rather than trusted because `**kwargs` is the easy way to add a
+    parameter and it costs exactly this each time.
+    """
+    from physionlabs.resources.evaluations import Evaluations
+    from physionlabs.resources.videos import Videos
+
+    for cls, name, expected in (
+        (Evaluations, "create", {"video", "prompt", "model", "model_version", "glitch_types", "metadata"}),
+        (Evaluations, "create_and_wait", {"video", "prompt", "model", "model_version", "glitch_types", "metadata", "timeout"}),
+        (Evaluations, "list", {"limit", "offset", "video_id", "status"}),
+        (Videos, "upload", {"path", "dedupe", "wait", "timeout"}),
+    ):
+        params = inspect.signature(getattr(cls, name)).parameters
+        var_kw = [p.name for p in params.values() if p.kind is inspect.Parameter.VAR_KEYWORD]
+        assert not var_kw, f"{cls.__name__}.{name} takes **{var_kw[0]}; name the parameters instead"
+        named = {p for p in params if p != "self"}
+        assert expected <= named, f"{cls.__name__}.{name} is missing {sorted(expected - named)}"
