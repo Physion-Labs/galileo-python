@@ -1,6 +1,6 @@
 [project]
 name = "physionlabs"
-version = "0.1.0rc2"
+version = "0.1.0rc3"
 description = "Official Python client for the Galileo video evaluation API."
 readme = "README.md"
 license = "Apache-2.0"
