@@ -10,7 +10,12 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: The version to publish. Must match pyproject.toml exactly.
+        description: >-
+          The version to publish. Must match pyproject.toml exactly. A
+          prerelease (0.1.0rc1) is fine — PyPI marks it as one, and
+          `pip install physionlabs` skips it unless the caller asks with
+          --pre or pins it. So there is no dist-tag equivalent to get wrong
+          here, unlike npm.
         required: true
       i_have_verified_the_live_contract:
         description: >-
@@ -75,17 +80,24 @@ jobs:
       - name: The wheel carries the marker and the license
         run: |
           python - <<'PY'
-          import glob, zipfile
+          import glob, re, zipfile
           wheel = glob.glob("dist/*.whl")[0]
           names = set(zipfile.ZipFile(wheel).namelist())
+          # The dist-info directory carries the version, so it is FOUND rather
+          # than spelled out — an earlier version of this check hardcoded 0.1.0
+          # and would have passed vacuously on the first release candidate,
+          # looking for a directory that no longer existed.
+          info = next((n.split("/")[0] for n in names if n.endswith(".dist-info/METADATA")), None)
+          assert info, f"{wheel} has no dist-info"
           missing = {n for n in (
               "physionlabs/py.typed",
-              "physionlabs-0.1.0.dist-info/licenses/LICENSE",
-              "physionlabs-0.1.0.dist-info/licenses/NOTICE",
+              f"{info}/licenses/LICENSE",
+              f"{info}/licenses/NOTICE",
           ) if n not in names}
           assert not missing, f"{wheel} is missing {sorted(missing)}"
           leaked = [n for n in names if n.startswith(("tests/", "scripts/", "openapi/"))]
           assert not leaked, f"{wheel} ships {leaked}"
+          print(f"{wheel}: {info}, marker and license present")
           PY
 
       - uses: pypa/gh-action-pypi-publish@release/v1

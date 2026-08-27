@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # So the live job can be re-run against a deployment that has changed without
+  # a commit to this repo — which is most of the reason it exists. The API moves
+  # on its own schedule; a contract check that can only run when the SDK changes
+  # would notice a drift on whatever day someone next touched the SDK.
+  workflow_dispatch:
 
 jobs:
   test:
@@ -36,16 +41,21 @@ jobs:
           import glob, zipfile
           wheel = glob.glob("dist/*.whl")[0]
           names = set(zipfile.ZipFile(wheel).namelist())
-          required = {
-              "physionlabs/py.typed",
-              "physionlabs-0.1.0.dist-info/licenses/LICENSE",
-              "physionlabs-0.1.0.dist-info/licenses/NOTICE",
+          # The dist-info directory carries the VERSION, so it is found rather
+          # than spelled out. Written out, this check named `0.1.0` and broke on
+          # the first release candidate — pointing at a missing license, which is
+          # the wrong thing to go looking at. The same mistake was in
+          # publish.yml; it lived in two places and was fixed in one.
+          info = next((n.split("/")[0] for n in names if n.endswith(".dist-info/METADATA")), None)
+          assert info, f"{wheel} has no dist-info"
+          missing = {
+              n for n in ("physionlabs/py.typed", f"{info}/licenses/LICENSE", f"{info}/licenses/NOTICE")
+              if n not in names
           }
-          missing = required - names
           assert not missing, f"{wheel} is missing {sorted(missing)}"
           leaked = [n for n in names if n.startswith(("tests/", "scripts/", "openapi/"))]
           assert not leaked, f"{wheel} ships {leaked}"
-          print(f"{wheel}: {len(names)} entries, marker and license present")
+          print(f"{wheel}: {info}, {len(names)} entries, marker and license present")
           PY
 
   # Talks to the development deployment. Deliberately NOT required: it fails when
