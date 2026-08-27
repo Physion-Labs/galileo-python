@@ -10,8 +10,16 @@ from __future__ import annotations
 
 import inspect
 import re
-import tomllib
+import sys
 from pathlib import Path
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    # `tomllib` entered the standard library in 3.11, and this package promises
+    # >=3.10. Caught by the CI matrix rather than locally, which is the matrix
+    # earning its place: a promise nothing exercises is a promise nobody keeps.
+    import tomli as tomllib
 
 import physionlabs
 from physionlabs import models

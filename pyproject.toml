@@ -35,6 +35,11 @@ dev = [
   "pyyaml>=6.0",
   "mypy>=1.13",
   "referencing>=0.37.0",
+  # Only to read pyproject.toml in tests/test_packaging.py on 3.10, where
+  # `tomllib` is not yet in the standard library. It already arrives as a
+  # transitive dependency of pytest there, which is exactly why it is declared:
+  # relying on that means a test breaks the day pytest stops needing it.
+  "tomli>=2.0; python_version < '3.11'",
 ]
 
 [build-system]
