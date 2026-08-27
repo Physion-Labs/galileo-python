@@ -43,15 +43,34 @@ def test_a_response_that_violates_the_contracts_own_ranges_still_parses():
     assert max(over) > 1.0, "and the model is supposed to hand them over unchanged"
 
 
-def test_nulls_are_values_not_missing_keys():
-    # The service sends `severity: null` rather than omitting the key, on every
-    # visual glitch. The contract says so; these models have to agree.
+def test_a_finding_carries_only_the_fields_its_kind_has():
+    """This test used to assert the opposite, and the opposite used to be true.
+
+    The service sent `severity: null` on every visual glitch, and
+    `prompt_segment: null` beside it, so the contract said the keys were present
+    with null values and these models agreed.
+
+    The response is now assembled per finding type, so a visual glitch has no
+    `severity` at all -- not null, absent -- and the models are a union narrowed
+    on `type`. Reaching for `severity` on a visual glitch is now a type error
+    rather than a None, which is the improvement: the old shape let you write it
+    and never told you it could not be a number.
+    """
+    from physionlabs.models import PromptMisalignment, VisualGlitch
+
     evaluation = Evaluation.model_validate(fixture("evaluation_completed"))
     assert evaluation.result is not None
-    vg = [g for g in evaluation.result.glitches if g.type.value == "visual_glitch"]
+
+    vg = [g for g in evaluation.result.glitches if isinstance(g, VisualGlitch)]
     assert vg, "the fixture should contain a visual glitch"
-    assert vg[0].severity is None
-    assert vg[0].prompt_segment is None
+    assert not hasattr(vg[0], "severity")
+    assert not hasattr(vg[0], "prompt_segment")
+    assert vg[0].region is not None
+
+    pm = [g for g in evaluation.result.glitches if isinstance(g, PromptMisalignment)]
+    assert pm, "the fixture should contain a prompt misalignment"
+    assert not hasattr(pm[0], "region")
+    assert pm[0].prompt_segment is not None
 
 
 def test_metadata_is_null_when_the_caller_passed_none():
@@ -63,15 +82,62 @@ def test_metadata_is_null_when_the_caller_passed_none():
     assert evaluation.metadata is None
 
 
-def test_undocumented_wire_fields_are_kept_rather_than_dropped():
-    # `glitch_category` and `module_versions` are on the wire and deliberately not
-    # in the contract. Not promising them is not the same as pretending they are
-    # absent, so `extra="allow"` keeps them reachable for anyone who needs one.
-    evaluation = Evaluation.model_validate(fixture("evaluation_completed"))
+def test_a_field_outside_the_contract_ends_up_nowhere():
+    """Undocumented fields are DROPPED, not parked in `model_extra`.
+
+    This test used to assert the opposite, on the reasoning that the contract
+    declining to promise `glitch_category` was not the same as pretending it was
+    absent — so `extra="allow"` kept it reachable.
+
+    The reasoning was answered upstream rather than argued with: the API now
+    assembles an API-key response from an allowlist, so those fields are not sent
+    at all and there is nothing for `allow` to preserve. What `allow` did preserve
+    was a promise we cannot keep — that whatever the server happens to send is
+    reachable, and therefore something a caller can build on and be broken by.
+
+    The fixture is a REAL response captured before that change, plus fields no
+    release has produced. Both are ignored the same way, which is the point: the
+    default for an unknown field is to disappear, not to become an attribute.
+    """
+    evaluation = Evaluation.model_validate(fixture("evaluation_with_internal_fields"))
+    assert evaluation.model_extra == {} or evaluation.model_extra is None
+
     assert evaluation.result is not None
-    extra = evaluation.result.glitches[0].model_extra or {}
-    assert "glitch_category" in extra
-    assert "module_versions" in (evaluation.model_extra or {})
+    for finding in evaluation.result.glitches:
+        assert finding.model_extra == {} or finding.model_extra is None
+
+    # Named individually as well, because an empty `model_extra` would also be
+    # what a parse that silently failed produced.
+    for internal in (
+        "module_versions",
+        "owner_id",
+        "internal_versions",
+        "timings",
+        "future_internal_field",
+    ):
+        assert not hasattr(evaluation, internal), f"{internal} became an attribute"
+
+    # And the thing the caller DID come for survived all of that.
+    assert evaluation.status.value == "completed"
+    assert evaluation.result.summary.num_glitches == len(evaluation.result.glitches)
+
+
+def test_a_run_says_how_long_it_took():
+    evaluation = Evaluation.model_validate(fixture("evaluation_completed"))
+    assert evaluation.timing is not None
+    assert evaluation.timing.e2e_ms == 43000
+    # One number, so a caller cannot reach for the model server's clock by mistake.
+    assert set(evaluation.timing.model_dump().keys()) == {"e2e_ms"}
+
+
+def test_an_unmeasured_run_reads_as_unmeasured_and_not_as_instant():
+    body = fixture("evaluation_completed")
+    body["timing"] = None
+    assert Evaluation.model_validate(body).timing is None
+
+    # Absent, not null: a response from a task that predates the field.
+    del body["timing"]
+    assert Evaluation.model_validate(body).timing is None
 
 
 def test_severity_means_what_the_contract_says():
@@ -80,7 +146,10 @@ def test_severity_means_what_the_contract_says():
     # video, and both prompt findings came back at 5.
     evaluation = Evaluation.model_validate(fixture("evaluation_completed"))
     assert evaluation.result is not None
-    pm = [g for g in evaluation.result.glitches if g.type.value == "prompt_misalignment"]
+    # `type` is a plain string here, not the GlitchType enum: pydantic needs a
+    # Literal to discriminate the union on. `isinstance` reads better and is what
+    # the test above uses; this one compares the string to show both work.
+    pm = [g for g in evaluation.result.glitches if g.type == "prompt_misalignment"]
     assert pm, "the fixture should contain prompt misalignments"
     for finding in pm:
         assert finding.severity is not None

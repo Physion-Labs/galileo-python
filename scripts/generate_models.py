@@ -78,6 +78,9 @@ CONSTRAINTS = frozenset(
 )
 
 
+ALIAS = '\n\n# ---------------------------------------------------------------------------\n# Appended by scripts/generate_models.py -- see _append_glitch_alias there.\n# ---------------------------------------------------------------------------\n\nGlitch = VisualGlitch | PromptMisalignment\n"""One finding: a visual glitch, or a prompt misalignment.\n\nA union, not a class. Which fields a finding carries depends on its `type`, so\nnarrow on that and the rest follows:\n\n    if finding.type is GlitchType.prompt_misalignment:\n        finding.severity\n    else:\n        finding.region\n"""\n'
+
+
 def strip(node: object) -> object:
     """Remove value constraints, everywhere, at any depth."""
     if isinstance(node, dict):
@@ -106,11 +109,32 @@ def main() -> int:
                 "--use-union-operator",
                 "--use-schema-description",
                 "--use-field-description",
-                # Undocumented wire fields (`glitch_category`, `module_versions`)
-                # are kept rather than silently dropped: the contract declines to
-                # promise them, which is not the same as pretending they are not
-                # there. A caller who needs one can reach it.
-                "--extra-fields", "allow",
+                # A `oneOf` becomes a RootModel wrapper by default, which would
+                # make the SDK's most-read field `finding.root.type` instead of
+                # `finding.type`. Collapsing it puts the union at the use site,
+                # so a finding IS the narrowed model — the same thing the
+                # TypeScript client gets from the same schema.
+                "--collapse-root-models",
+                # IGNORE, not allow. This used to be `allow`, on the reasoning
+                # that the contract declining to promise a field is not the same
+                # as pretending it is absent — a caller who needed
+                # `glitch_category` or `module_versions` could reach it through
+                # `model_extra`.
+                #
+                # That reasoning was answered upstream rather than argued with:
+                # the API now assembles a public response from an allowlist, so
+                # those fields are not sent to an API key at all and there is
+                # nothing for `allow` to preserve. What it does preserve is a
+                # promise we cannot keep — that whatever the server happens to
+                # send is reachable and therefore usable. `model_extra` is where
+                # a caller would find a field we never documented, build on it,
+                # and be broken by a release that stops sending it.
+                #
+                # `ignore` also makes a leak visible from the client side: an
+                # internal field reaching a response ends up nowhere rather than
+                # quietly in `model_extra`, and the test that asserts
+                # `model_extra` is empty is then a real check on the service.
+                "--extra-fields", "ignore",
                 "--formatters", "black",
                 "--disable-timestamp",
                 "--custom-file-header",
@@ -127,8 +151,26 @@ def main() -> int:
     if result.returncode != 0:
         sys.stderr.write(result.stdout + result.stderr)
         return result.returncode
+    _append_glitch_alias()
     print(f"{OUT.relative_to(ROOT)}: {len(OUT.read_text().splitlines())} lines")
     return 0
+
+
+def _append_glitch_alias() -> None:
+    """Give the union back its name.
+
+    `--collapse-root-models` puts the union at the use site, which is what makes
+    a finding `finding.type` instead of `finding.root.type`. The cost is that the
+    generator then emits no `Glitch` symbol at all -- and `Glitch` is a name this
+    package has already published, and the name the TypeScript client uses for
+    the same schema.
+
+    Appended by the generator rather than written into the file by hand: the file
+    says DO NOT EDIT and means it, so the one thing added to it is added by the
+    thing that owns it.
+    """
+    OUT.write_text(OUT.read_text() + ALIAS)
+
 
 
 if __name__ == "__main__":

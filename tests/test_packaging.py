@@ -139,3 +139,55 @@ def test_the_readme_does_not_claim_the_package_is_unpublished():
     for stale in ("Not published yet", "does not exist on PyPI", "under construction"):
         assert stale not in readme, f'README still says "{stale}"'
     assert "Release candidate" in readme or "not final until" in readme
+
+
+def test_response_models_ignore_what_the_contract_does_not_name():
+    """The setting lives in the GENERATOR, so regenerating cannot undo it.
+
+    `models.py` says DO NOT EDIT and is rewritten wholesale by
+    `scripts/generate_models.py`. A hand-patched `extra="ignore"` would therefore
+    survive exactly until the next contract sync, and the failure would be
+    silent: unknown fields quietly reappear in `model_extra`, where a caller can
+    build on them.
+
+    So this asserts BOTH ends — the flag in the script and the result in the
+    generated file — because either one alone can be true while the other is not.
+    """
+    script = (ROOT / "scripts" / "generate_models.py").read_text()
+    assert '"--extra-fields", "ignore"' in script, "the generator no longer asks for ignore"
+    assert '"--extra-fields", "allow"' not in script
+
+    models = (ROOT / "src" / "physionlabs" / "models.py").read_text()
+    assert "extra='ignore'" in models
+    assert "extra='allow'" not in models, "a regenerated model went back to allow"
+
+
+def test_the_generated_models_are_what_the_contract_generates():
+    """Regenerate into a scratch copy and compare.
+
+    The models are generated, so the only thing keeping them honest is that
+    somebody ran the script after changing the contract. This runs it.
+    """
+    import subprocess
+    import sys
+
+    committed = (ROOT / "src" / "physionlabs" / "models.py").read_text()
+    backup = committed
+    try:
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "generate_models.py")],
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        regenerated = (ROOT / "src" / "physionlabs" / "models.py").read_text()
+        assert regenerated == committed, (
+            "src/physionlabs/models.py is not what the contract generates. "
+            "Run `uv run python scripts/generate_models.py` and commit the result."
+        )
+    finally:
+        # Put the committed copy back whatever happened, so a failing assertion
+        # does not leave a regenerated file in the working tree.
+        (ROOT / "src" / "physionlabs" / "models.py").write_text(backup)

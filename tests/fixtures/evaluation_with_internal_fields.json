@@ -896,29 +896,42 @@
             "timecode": "00:00:00:20"
           }
         },
-        "description": "plate: A white plate with brown stains is being held under running water by robotic arms. As the clip progresses, the brown stains on the plate's surface morph and shift around, changing their pattern even though the plate itself is not being scrubbed or rotated. Dirt stains should stay fixed to the surface of a rigid object, so this spontaneous shifting of the pattern is a glitch."
+        "severity": null,
+        "confidence": null,
+        "description": "plate: A white plate with brown stains is being held under running water by robotic arms. As the clip progresses, the brown stains on the plate's surface morph and shift around, changing their pattern even though the plate itself is not being scrubbed or rotated. Dirt stains should stay fixed to the surface of a rigid object, so this spontaneous shifting of the pattern is a glitch.",
+        "prompt_segment": null,
+        "glitch_category": "V02_02",
+        "future_internal_field": "secret"
       },
       {
         "id": "gl_pm_r2",
         "type": "prompt_misalignment",
+        "region": null,
         "severity": 5,
+        "confidence": null,
         "description": "Robot arm picks up a red block \u2014 The object is a white plate, not a red block.",
         "prompt_segment": {
           "text": "picks up a red block",
           "char_end": 32,
           "char_start": 12
-        }
+        },
+        "glitch_category": null,
+        "future_internal_field": "secret"
       },
       {
         "id": "gl_pm_r3",
         "type": "prompt_misalignment",
+        "region": null,
         "severity": 5,
+        "confidence": null,
         "description": "Robot arm places the object in a bin \u2014 The object is washed in a sink, not placed in a bin.",
         "prompt_segment": {
           "text": "and places it in a bin",
           "char_end": 55,
           "char_start": 33
-        }
+        },
+        "glitch_category": null,
+        "future_internal_field": "secret"
       }
     ],
     "summary": {
@@ -933,16 +946,43 @@
   "detectors": [
     {
       "status": "completed",
-      "detector": "visual_glitch"
+      "detector": "visual_glitch",
+      "model_version": "0.1"
     },
     {
       "status": "completed",
-      "detector": "prompt_misalignment"
+      "detector": "prompt_misalignment",
+      "model_version": "0.1"
     }
   ],
   "model_version": "0.1",
+  "module_versions": {
+    "dino": "unregistered",
+    "text": "unregistered",
+    "shots": "unregistered",
+    "track": "unregistered",
+    "detect": "1.0.0",
+    "verify": "1.3.0",
+    "misalign": "0.1.1"
+  },
   "output_schema_version": "evaluation-schema-2026-06-01",
-  "timing": {
-    "e2e_ms": 43000
+  "owner_id": "user_3GImZYYwPTjdKYbSiOJOCjosK4s",
+  "future_internal_field": "secret",
+  "internal_versions": {
+    "orchestrator": "3.2.1"
+  },
+  "timings": {
+    "queued_at_ms": 1787866882000,
+    "settled_at_ms": 1787866925000,
+    "e2e_ms": 43000,
+    "served": {
+      "took_s": 30.2,
+      "spans": [
+        {
+          "host": "10.77.4.19:9000"
+        }
+      ],
+      "replica": "10.77.4.19"
+    }
   }
 }

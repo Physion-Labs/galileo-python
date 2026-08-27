@@ -12,21 +12,40 @@ from physionlabs.models import Evaluation, EvaluationCounts, EvaluationList, Mod
 from .conftest import fixture
 
 
-def test_the_retry_trio_is_modelled():
-    # Without these a caller who retries cannot link the two runs, and
-    # `retried_by` is the field the server's idempotency is implemented on.
-    for field in ("attempt", "retry_of", "retried_by"):
-        assert field in Evaluation.model_fields, f"Evaluation is missing {field}"
-        assert not Evaluation.model_fields[field].is_required(), f"{field} must be optional"
+def test_which_attempt_this_is_survives_and_the_lineage_does_not():
+    """`attempt` is public; `retry_of` and `retried_by` are not, any more.
+
+    They were, and this test asserted all three. The pair points between ATTEMPT
+    ids -- storage keys for rows a caller cannot fetch and has no use for -- and
+    `retried_by` exists because the server implements retry idempotency on it.
+    That is our mechanism, not a caller's fact, and publishing it would make it
+    something we have to keep.
+
+    What a caller actually needs from a retry is which try they are looking at,
+    so that is what stays. `POST /v1/evaluations/{id}/retry` answers with the
+    successor, which is the link the pair used to provide.
+    """
+    assert "attempt" in Evaluation.model_fields
+    assert not Evaluation.model_fields["attempt"].is_required()
+
+    for gone in ("retry_of", "retried_by", "attempt_id", "superseded_attempts"):
+        assert gone not in Evaluation.model_fields, f"{gone} is back on the public model"
 
 
-def test_an_evaluation_carrying_the_retry_trio_parses():
+def test_an_evaluation_that_still_carries_the_old_lineage_parses_and_drops_it():
+    # A response from a task that predates the change, or from the console's own
+    # projection. It must not raise -- a client that refuses to parse a response
+    # carrying MORE than it expected turns a server change into an outage.
     ev = Evaluation.model_validate(
-        {**fixture("evaluation_completed"), "attempt": 2, "retry_of": "eval_1", "retried_by": None}
+        {
+            **fixture("evaluation_completed"),
+            "attempt": 2,
+            "retry_of": "01a0456d-4129-770f-b0a5-b49bdcc1ec66",
+            "retried_by": None,
+        }
     )
     assert ev.attempt == 2
-    assert ev.retry_of == "eval_1"
-    assert ev.retried_by is None
+    assert not hasattr(ev, "retry_of")
 
 
 def test_the_list_carries_a_census():
@@ -43,11 +62,20 @@ def test_the_list_carries_a_census():
 
 
 def test_a_census_with_a_status_this_client_has_not_heard_of_still_parses():
-    # `EvaluationCounts` allows additional integer properties on purpose: the set
-    # of statuses is the server's to grow.
+    """The set of statuses is the server's to grow, and growing it must not raise.
+
+    What changed is where the unknown one ENDS UP. It used to be reachable
+    through `model_extra`; response models now ignore what the contract does not
+    name, so it is dropped. That is the trade this SDK makes on purpose: a field
+    in `model_extra` is a field a caller can build on and be broken by, and the
+    fix for wanting a new status is a released client that models it.
+
+    The part that matters either way is that parsing succeeds and the statuses
+    this client does know are right.
+    """
     counts = EvaluationCounts.model_validate({"completed": 3, "quarantined": 1})
     assert counts.completed == 3
-    assert (counts.model_extra or {}).get("quarantined") == 1
+    assert not hasattr(counts, "quarantined")
 
 
 def test_model_versions_are_nullable():
@@ -76,13 +104,28 @@ def test_model_versions_are_nullable():
     assert type(None) in getattr(version.annotation, "__args__", ()), "the value may be null"
 
 
-def test_optional_and_nullable_are_distinguished():
-    from physionlabs.models import Glitch
+def test_an_optional_field_reads_as_absent_rather_than_as_a_value():
+    """In Python, absence and null are the same read, and that is the right one.
 
-    # optional and nullable — the key may be absent, and null when present
-    severity = Glitch.model_fields["severity"]
+    This test used to claim the two were distinguished. They are not, and cannot
+    be in a generated pydantic model: an optional field becomes `X | None = None`,
+    so a key that was absent and a key that was null both come back as `None`.
+
+    That is fine here because the server sends neither for these fields, and it
+    is what a caller wants anyway -- `if finding.severity is None` is the correct
+    test whichever way the wire spelled it. The contract carries the distinction
+    for the readers who need it (it says which fields are sent as an explicit
+    null); the client collapses it deliberately.
+    """
+    from physionlabs.models import PromptMisalignment
+
+    severity = PromptMisalignment.model_fields["severity"]
     assert not severity.is_required()
-    assert type(None) in getattr(severity.annotation, "__args__", ())
+    assert severity.default is None
+
+    attempt = Evaluation.model_fields["attempt"]
+    assert not attempt.is_required()
+    assert attempt.default is None
 
     # optional, and the contract gives it no null: `attempt` is either a number
     # or not there.

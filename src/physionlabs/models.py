@@ -5,8 +5,8 @@
 from __future__ import annotations
 
 from enum import Enum
-from pydantic import BaseModel, ConfigDict, Field, RootModel
-from typing import Any, Dict, Literal
+from pydantic import BaseModel, ConfigDict, Field
+from typing import Annotated, Any, Dict, Literal
 
 
 class ModelId(Enum):
@@ -52,7 +52,7 @@ class ContentType(Enum):
 
 class VideoCreate(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     content_type: ContentType
     """
@@ -82,7 +82,7 @@ class VideoCreate(BaseModel):
 
 class VideoReservation(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     video_id: str
     """
@@ -104,7 +104,7 @@ class VideoReservation(BaseModel):
 
 class Video(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     id: str
     object: Literal['video'] | None = None
@@ -122,7 +122,7 @@ class Video(BaseModel):
 
 class VideoUrlRef(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     url: str
     """
@@ -132,7 +132,7 @@ class VideoUrlRef(BaseModel):
 
 class VideoBase64Ref(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     b64_json: str = Field(..., json_schema_extra={'contentEncoding': 'base64'})
     """
@@ -143,7 +143,7 @@ class VideoBase64Ref(BaseModel):
 
 class VideoUploadRef(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     upload_id: str
     """
@@ -151,30 +151,26 @@ class VideoUploadRef(BaseModel):
     """
 
 
-class VideoRef(RootModel[VideoUrlRef | VideoUploadRef | VideoBase64Ref]):
-    root: VideoUrlRef | VideoUploadRef | VideoBase64Ref
-    """
-    How to give us the video. Exactly one of the three, and the choice is mostly about size.
-    `upload_id` is the general answer: upload the file first (three calls, one of them straight to storage -- see `POST /v1/videos`) and reference it here. It is the only option that both reaches the 50 MB file limit and keeps the video private to your account.
-    `url` is the shortcut when the video is already hosted somewhere we can GET. Note that it has to be publicly reachable; we send no credentials.
-    `b64_json` sends the bytes inline. Convenient for a small local file, but bounded by the request body limit rather than the file limit -- see `POST /v1/evaluations`.
-    """
-
-
 class EvaluationCreate(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     model: ModelId | None = None
     model_version: str | None = None
     """
     Concrete model version to run. The deployment default applies when omitted.
     """
-    prompt: str | None = None
+    prompt: str
     """
-    Required when prompt-misalignment detection runs.
+    What the video was meant to show. REQUIRED as of 2026-08-27 (previously optional, defaulting to ""); empty or whitespace-only is refused with `missing_prompt`.
     """
-    video: VideoRef
+    video: VideoUrlRef | VideoUploadRef | VideoBase64Ref
+    """
+    How to give us the video. Exactly one of the three, and the choice is mostly about size.
+    `upload_id` is the general answer: upload the file first (three calls, one of them straight to storage -- see `POST /v1/videos`) and reference it here. It is the only option that both reaches the 50 MB file limit and keeps the video private to your account.
+    `url` is the shortcut when the video is already hosted somewhere we can GET. Note that it has to be publicly reachable; we send no credentials.
+    `b64_json` sends the bytes inline. Convenient for a small local file, but bounded by the request body limit rather than the file limit -- see `POST /v1/evaluations`.
+    """
     glitch_types: list[GlitchType] | None = None
     metadata: dict[str, Any] | None = None
     """
@@ -184,7 +180,7 @@ class EvaluationCreate(BaseModel):
 
 class TimePoint(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     frame: int
     sec: float
@@ -193,7 +189,7 @@ class TimePoint(BaseModel):
 
 class BoundingBox(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     xmin: float
     ymin: float
@@ -203,7 +199,7 @@ class BoundingBox(BaseModel):
 
 class BoxKeyframe(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     frame: int
     sec: float
@@ -212,7 +208,7 @@ class BoxKeyframe(BaseModel):
 
 class GlitchRegion(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     start: TimePoint
     end: TimePoint
@@ -221,14 +217,14 @@ class GlitchRegion(BaseModel):
 
 class PromptSegment(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     text: str
     char_start: int
     char_end: int
 
 
-class Source(Enum):
+class GlitchSource(Enum):
     """
     Who produced this finding. Absent means the model, which is the common case -- the field is only set explicitly where a human annotated something the model missed, so treat its absence as `model` rather than as unknown.
     Deliberately NOT declared with a `default`. A default reads to a code generator as "the server always sends this", and it does not: the value is omitted, not defaulted, and a generated type that made it required would be wrong on almost every finding.
@@ -238,39 +234,45 @@ class Source(Enum):
     human = 'human'
 
 
-class Glitch(BaseModel):
+class VisualGlitch(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     id: str
-    type: GlitchType
+    type: Literal['visual_glitch']
     description: str
-    prompt_segment: PromptSegment | None = None
-    """
-    The prompt span this finding is about. `prompt_misalignment` only.
-    NULL, not absent, on a `visual_glitch`. The service sends the key with a null value rather than omitting it, and this schema says so because a contract that quietly disagreed with the wire would be worse than an ugly one. Check for a value, not for the key.
-    """
+    source: GlitchSource | None = None
     region: GlitchRegion | None = None
     """
-    Where in the video this finding is. Public for `visual_glitch`.
-    NULL on a `prompt_misalignment`: the service produces one but it is not stable enough to publish, so it is withheld — as a null value, not an absent key.
+    Where in the video this finding is, with per-frame boxes.
+    Absent on a finding the detector localised no further than the clip.
     """
-    source: Source | None = None
+
+
+class PromptMisalignment(BaseModel):
+    model_config = ConfigDict(
+        extra='ignore',
+    )
+    id: str
+    type: Literal['prompt_misalignment']
+    description: str
+    source: GlitchSource | None = None
+    prompt_segment: PromptSegment | None = None
     """
-    Who produced this finding. Absent means the model, which is the common case -- the field is only set explicitly where a human annotated something the model missed, so treat its absence as `model` rather than as unknown.
-    Deliberately NOT declared with a `default`. A default reads to a code generator as "the server always sends this", and it does not: the value is omitted, not defaulted, and a generated type that made it required would be wrong on almost every finding.
+    The span of your prompt this finding is about.
     """
     severity: int | None = None
     """
-    NULL on a `visual_glitch` -- the key is sent with a null value rather than omitted, so test the value.
-    How far a prompt requirement was from being realized: `6 - score`, so 1 is a minor mismatch and 5 means the requirement is absent entirely. This is also the number the reporting threshold reads, so a finding you receive is by definition one that cleared it.
-    In practice this is a `prompt_misalignment` field. The visual detector does not score its findings, so a `visual_glitch` normally has no `severity` at all; where one does appear it came from an older pipeline and grades the defect rather than a requirement. Either way it is optional — branch on `type` and handle its absence rather than assuming a default.
+    How far a prompt requirement was from being realized: `6 - score`, so 1 is a minor mismatch and 5 means the requirement is absent entirely. It reads in the OPPOSITE direction from a score, which is the one thing worth getting right before you threshold on it.
+    This is also the number our own reporting threshold reads, so a finding you receive is by definition one that cleared it.
+    There is deliberately no `confidence` beside it. That is the model's certainty about its own answer -- a different axis, not stable across releases, and not calibrated for anyone outside to threshold on.
+    Optional: a finding from an older pipeline may carry no score.
     """
 
 
 class EvaluationSummary(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     num_glitches: int
     has_visual_glitch: bool
@@ -279,7 +281,7 @@ class EvaluationSummary(BaseModel):
 
 class VideoInfo(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     duration_sec: float
     width: int
@@ -288,9 +290,20 @@ class VideoInfo(BaseModel):
     num_frames: int
 
 
+class Timing(BaseModel):
+    model_config = ConfigDict(
+        extra='ignore',
+    )
+    e2e_ms: int
+    """
+    Milliseconds from submission to the terminal answer, measured by the service. This is what you waited: it includes our queueing, fetching the video, and the model's own time.
+    One number rather than a breakdown, deliberately. The finer measurements are the model server's own clock in its own units, and a number read from the wrong level is wrong by three orders of magnitude rather than plausibly close.
+    """
+
+
 class EvaluationUsage(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     video_seconds: float
     billable_units: float
@@ -298,7 +311,7 @@ class EvaluationUsage(BaseModel):
 
 class DetectorError(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     code: str
     message: str
@@ -306,24 +319,16 @@ class DetectorError(BaseModel):
 
 class DetectorState(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     detector: GlitchType
     status: DetectorStatus
     error: DetectorError | None = None
 
 
-class EvaluationResult(BaseModel):
-    model_config = ConfigDict(
-        extra='allow',
-    )
-    glitches: list[Glitch]
-    summary: EvaluationSummary
-
-
 class EvaluationFailure(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     type: str
     code: str
@@ -333,61 +338,10 @@ class EvaluationFailure(BaseModel):
 
 class Input(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     prompt: str
     video: VideoInfo
-
-
-class Evaluation(BaseModel):
-    model_config = ConfigDict(
-        extra='allow',
-    )
-    id: str
-    object: Literal['evaluation']
-    model: ModelId
-    model_version: str
-    output_schema_version: str
-    created: int
-    """
-    Unix timestamp in seconds.
-    """
-    status: EvaluationStatus
-    input: Input
-    usage: EvaluationUsage
-    result: EvaluationResult | None
-    error: EvaluationFailure | None = None
-    """
-    Why the run failed, on a `failed` one. NULL on a run that did not fail, and ABSENT on rows written before this field existed.
-    Not in `required`, and that is a correction rather than a preference: it was, and the older rows in the store do not carry the key at all. A client that enforced the contract at runtime — the Python one does, since its models validate — raised on any page deep enough to reach them, while the TypeScript client passed because its types are erased before a response is ever seen. So the contract was not merely wrong, it was wrong in a way that only one of the two clients could report.
-    Test for a VALUE, not for the key.
-    """
-    detectors: list[DetectorState] | None = None
-    """
-    Per-detector state. Older evaluations may omit this field.
-    """
-    video_id: str | None = None
-    """
-    Stored video identifier when the evaluation used an uploaded video.
-    """
-    attempt: int | None = None
-    """
-    Which try this is. 1 for a run submitted directly; 2 or more for one produced by `POST /v1/evaluations/{evaluation_id}/retry`. There is a ceiling, so a clip that keeps failing under the same instructions stops being retryable rather than being retried forever.
-    """
-    retry_of: str | None = None
-    """
-    The failed evaluation this one was filed to replace, if any.
-    """
-    retried_by: str | None = None
-    """
-    The evaluation filed to replace this one, if it has been retried.
-    Set at most once, which is what makes retrying idempotent: a burst of presses claims this field exactly once, and every press that loses the race is handed the winner.
-    """
-    metadata: dict[str, Any] | None = None
-    """
-    Whatever you passed on create, echoed back. NULL when you passed nothing -- the key is always present, its value says whether there was any.
-    Only found by submitting through the API. Every evaluation created in the console carries metadata, so a contract checked against console traffic alone looked correct here.
-    """
 
 
 class EvaluationCounts(BaseModel):
@@ -397,7 +351,7 @@ class EvaluationCounts(BaseModel):
     """
 
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     __annotations__ = {
         '__pydantic_extra__': Dict[str, int],
@@ -409,18 +363,9 @@ class EvaluationCounts(BaseModel):
     failed: int | None = None
 
 
-class EvaluationList(BaseModel):
-    model_config = ConfigDict(
-        extra='allow',
-    )
-    object: Literal['list']
-    data: list[Evaluation]
-    counts: EvaluationCounts | None = None
-
-
 class RateLimitWindow(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     limit: int
     used: int
@@ -433,7 +378,7 @@ class RateLimitWindow(BaseModel):
 
 class QuotaScopes(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     detect: RateLimitWindow
     generate: RateLimitWindow
@@ -442,14 +387,14 @@ class QuotaScopes(BaseModel):
 
 class QuotaReport(RateLimitWindow):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     scopes: QuotaScopes
 
 
 class RateLimitDefinition(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     max: int
     window_sec: int
@@ -457,7 +402,7 @@ class RateLimitDefinition(BaseModel):
 
 class ApiKeySummary(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     name: str
     prefix: str
@@ -466,7 +411,7 @@ class ApiKeySummary(BaseModel):
 
 class ModelBuild(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     id: ModelId
     label: str
@@ -480,7 +425,7 @@ class ModelBuild(BaseModel):
 
 class Input1(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     formats: list[str]
     max_duration_sec: float
@@ -490,7 +435,7 @@ class Input1(BaseModel):
 
 class Model(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     id: ModelId
     object: Literal['model']
@@ -505,7 +450,7 @@ class Model(BaseModel):
 
 class ModelList(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     object: Literal['list']
     builds: list[ModelBuild]
@@ -518,7 +463,7 @@ class ModelList(BaseModel):
 
 class PerSecondByDetector(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     visual_glitch: float | None = None
     prompt_misalignment: float | None = None
@@ -526,7 +471,7 @@ class PerSecondByDetector(BaseModel):
 
 class PricingRates(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     per_second_per_detector: float
     per_second_by_detector: PerSecondByDetector | None = None
@@ -537,7 +482,7 @@ class PricingRates(BaseModel):
 
 class Credits(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     credits: float
     pricing: PricingRates
@@ -554,7 +499,7 @@ class ComponentState(Enum):
 
 class ComponentStatus(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     key: str
     name: str
@@ -566,7 +511,7 @@ class ComponentStatus(BaseModel):
 
 class SystemStatus(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     state: ComponentState
     checked_at: int
@@ -606,7 +551,7 @@ class ErrorCode(Enum):
 
 class Error(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     type: ErrorType
     code: ErrorCode
@@ -616,15 +561,82 @@ class Error(BaseModel):
 
 class ErrorResponse(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     error: Error
     quota: RateLimitWindow | None = None
 
 
+class EvaluationResult(BaseModel):
+    model_config = ConfigDict(
+        extra='ignore',
+    )
+    glitches: list[
+        Annotated[VisualGlitch | PromptMisalignment, Field(discriminator='type')]
+    ]
+    summary: EvaluationSummary
+
+
+class Evaluation(BaseModel):
+    model_config = ConfigDict(
+        extra='ignore',
+    )
+    id: str
+    object: Literal['evaluation']
+    model: ModelId
+    model_version: str
+    output_schema_version: str
+    created: int
+    """
+    Unix timestamp in seconds.
+    """
+    status: EvaluationStatus
+    input: Input
+    usage: EvaluationUsage
+    result: EvaluationResult | None
+    error: EvaluationFailure | None = None
+    """
+    Why the run failed, on a `failed` one. NULL on a run that did not fail, and ABSENT on rows written before this field existed.
+    Not in `required`, and that is a correction rather than a preference: it was, and the older rows in the store do not carry the key at all. A client that enforced the contract at runtime — the Python one does, since its models validate — raised on any page deep enough to reach them, while the TypeScript client passed because its types are erased before a response is ever seen. So the contract was not merely wrong, it was wrong in a way that only one of the two clients could report.
+    Test for a VALUE, not for the key.
+    """
+    detectors: list[DetectorState] | None = None
+    """
+    Per-detector state. Older evaluations may omit this field.
+    """
+    video_id: str | None = None
+    """
+    Stored video identifier when the evaluation used an uploaded video.
+    """
+    attempt: int | None = None
+    """
+    Which try this is. 1 for a run submitted directly; 2 or more for one produced by `POST /v1/evaluations/{evaluation_id}/retry`. There is a ceiling, so a clip that keeps failing under the same instructions stops being retryable rather than being retried forever.
+    """
+    timing: Timing | None = None
+    """
+    How long this run took. NULL when nothing was measured -- which is every run settled before it was recorded, and is not backfillable.
+    Null and never 0. A run whose latency nobody recorded and a run that took no time are different claims, and only one of them is true.
+    NOT in `required`, for the same reason `error` is not: during a rolling deploy some tasks are still the older build, and a response from one of those carries no such key. A client that enforces the contract at runtime -- the Python one does -- would raise on those responses, and it would raise only during a deploy, which is the worst time to be debugging a client. Test for a VALUE, not for the key.
+    """
+    metadata: dict[str, Any] | None = None
+    """
+    Whatever you passed on create, echoed back. NULL when you passed nothing -- the key is always present, its value says whether there was any.
+    Only found by submitting through the API. Every evaluation created in the console carries metadata, so a contract checked against console traffic alone looked correct here.
+    """
+
+
+class EvaluationList(BaseModel):
+    model_config = ConfigDict(
+        extra='ignore',
+    )
+    object: Literal['list']
+    data: list[Evaluation]
+    counts: EvaluationCounts | None = None
+
+
 class RateLimits(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     detect: RateLimitDefinition
     generate: RateLimitDefinition
@@ -633,7 +645,7 @@ class RateLimits(BaseModel):
 
 class AccountLimits(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     requests_per_min: int
     window_sec: int
@@ -643,7 +655,7 @@ class AccountLimits(BaseModel):
 
 class Account(BaseModel):
     model_config = ConfigDict(
-        extra='allow',
+        extra='ignore',
     )
     object: Literal['user']
     id: str | None
@@ -654,3 +666,20 @@ class Account(BaseModel):
     unlimited: bool
     limits: AccountLimits
     api_key: ApiKeySummary | None = None
+
+
+# ---------------------------------------------------------------------------
+# Appended by scripts/generate_models.py -- see _append_glitch_alias there.
+# ---------------------------------------------------------------------------
+
+Glitch = VisualGlitch | PromptMisalignment
+"""One finding: a visual glitch, or a prompt misalignment.
+
+A union, not a class. Which fields a finding carries depends on its `type`, so
+narrow on that and the rest follows:
+
+    if finding.type is GlitchType.prompt_misalignment:
+        finding.severity
+    else:
+        finding.region
+"""
