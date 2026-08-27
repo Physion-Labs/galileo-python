@@ -126,3 +126,16 @@ def test_the_submit_methods_name_their_parameters():
         assert not var_kw, f"{cls.__name__}.{name} takes **{var_kw[0]}; name the parameters instead"
         named = {p for p in params if p != "self"}
         assert expected <= named, f"{cls.__name__}.{name} is missing {sorted(expected - named)}"
+
+
+def test_the_readme_does_not_claim_the_package_is_unpublished():
+    """The README is what PyPI renders on the project page.
+
+    A "not published yet" line is therefore read by everyone who arrives at a
+    published package, and it survived the first two releases. The caveat that
+    belongs there — this is a release candidate — has to stay.
+    """
+    readme = (ROOT / "README.md").read_text()
+    for stale in ("Not published yet", "does not exist on PyPI", "under construction"):
+        assert stale not in readme, f'README still says "{stale}"'
+    assert "Release candidate" in readme or "not final until" in readme
