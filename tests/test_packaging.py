@@ -51,6 +51,20 @@ def test_the_runtime_depends_on_two_things_and_no_more():
     names = sorted(d.split(">")[0].split("=")[0].strip() for d in deps)
     assert names == ["httpx", "pydantic"]
 
+    # And every one of them is BOUNDED ABOVE. Without a ceiling, a clean install
+    # of this package resolved httpx 1.0.dev5, which had removed `timeout` from
+    # `Client.__init__` — the client raised TypeError before making a request,
+    # while every test here passed against the 0.28.1 the lock file pins.
+    #
+    # A lock file protects development and CI. It protects no consumer: they
+    # resolve from these specifiers.
+    for dep in deps:
+        assert "<" in dep, (
+            f"{dep!r} has no upper bound. The next major of a dependency is "
+            "allowed to break, and an unbounded specifier accepts it silently, "
+            "for everyone, on release day."
+        )
+
 
 def test_the_models_do_not_enforce_the_contracts_value_ranges():
     # The guard on scripts/generate_models.py. If a regeneration ever emits

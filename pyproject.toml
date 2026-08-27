@@ -1,6 +1,6 @@
 [project]
 name = "physionlabs"
-version = "0.1.0rc1"
+version = "0.1.0rc2"
 description = "Official Python client for the Galileo video evaluation API."
 readme = "README.md"
 license = "Apache-2.0"
@@ -18,9 +18,21 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Typing :: Typed",
 ]
+# UPPER BOUNDS, and they are not caution for its own sake.
+#
+# `httpx>=0.27` with no ceiling let a clean install of this package resolve
+# httpx 1.0.dev5, which removed `timeout` from `Client.__init__` — so the client
+# raised TypeError before making a single request. Caught by installing the
+# published wheel into an empty venv, which is the only place it could be caught:
+# the lock file pins 0.28.1 for development and CI, so every test passed.
+#
+# `<1` on httpx and `<3` on pydantic are the next MAJOR of each, where a break is
+# permitted by their own versioning. Raising a bound is a deliberate change with
+# a test run behind it, which is the point — an unbounded dependency makes that
+# decision on its own, on the day upstream releases, for every installed copy.
 dependencies = [
-  "httpx>=0.27",
-  "pydantic>=2.9",
+  "httpx>=0.27,<1",
+  "pydantic>=2.9,<3",
 ]
 
 [project.urls]
