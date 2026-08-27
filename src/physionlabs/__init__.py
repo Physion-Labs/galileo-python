@@ -17,6 +17,8 @@ own server's output.
 
 from __future__ import annotations
 
+from importlib.metadata import version as _metadata_version
+
 from ._client import DEFAULT_BASE_URL, Galileo
 from .errors import (
     APIError,
@@ -52,7 +54,11 @@ from .models import (
     VideoStatus,
 )
 
-__version__ = "0.1.0rc3"
+# Read from the installed metadata rather than written here, so pyproject.toml is
+# the only place a version exists. The hardcoded copy went stale on the rc.4 bump
+# — caught by a test, but the Node SDK solves the same problem by generating the
+# constant, and one source of truth beats two that a test compares.
+__version__ = _metadata_version("physionlabs")
 
 __all__ = [
     "Galileo",
