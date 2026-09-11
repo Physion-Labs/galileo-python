@@ -564,6 +564,14 @@ class PricingRates(BaseModel):
     cache_hit_rate: float
     assumed_duration_sec: float
     generation_from_catalog: bool | None = None
+    flat_per_run: float | None = None
+    """
+    What a whole analysis costs, whatever its length and whichever detectors run — 10 credits ($0.10) on the v4 card. WHEN THIS IS PRESENT IT IS THE WHOLE PRICE: the per-second fields above, the cache multiplier and the minimum all stop applying. They remain on the card because an account on an older one is charged by them, so a client pricing a run locally must check this field first.
+    """
+    per_second_per_run: float | None = None
+    """
+    What one second of clip costs for the whole analysis, whichever detectors run — 1 credit ($0.01) per second on the current card. The price of a run is this times the clip's duration rounded UP to a whole second, floored at `minimum`. Like `flat_per_run` it is the whole price: the per-detector fields and the cache multiplier stop applying. Check `flat_per_run` first, then this, and only then the per-detector fields.
+    """
 
 
 class Credits(BaseModel):
@@ -571,6 +579,10 @@ class Credits(BaseModel):
         extra='ignore',
     )
     credits: float
+    usd: str = Field(..., examples=['10.00'])
+    """
+    The same balance as money, e.g. "10.00". See Account.usd.
+    """
     pricing: PricingRates
     unlimited: bool
     per_generated_sec: float
@@ -755,6 +767,13 @@ class Account(BaseModel):
     name: str | None
     tier: str
     credits: float
+    """
+    Balance in credits — the stored integer, and the unit that moves. One credit is one cent.
+    """
+    usd: str = Field(..., examples=['10.00'])
+    """
+    The same balance as money, e.g. "10.00". Credits are what a client should compute with; this is what it should show a person.
+    """
     unlimited: bool
     limits: AccountLimits
     api_key: ApiKeySummary | None = None

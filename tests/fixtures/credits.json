@@ -12,5 +12,6 @@
     "per_second_per_detector": 7.6
   },
   "unlimited": false,
-  "per_generated_sec": 1
+  "per_generated_sec": 1,
+  "usd": "93.98"
 }
