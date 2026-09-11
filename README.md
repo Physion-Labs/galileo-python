@@ -5,19 +5,33 @@ Official Python client for the Galileo video evaluation API.
 > **Release candidate.** `pip install physionlabs` resolves it. The API below is
 > not final until 0.1.0, and this notice is what will change when it is.
 
+## Setup
+
+```bash
+pip install --pre physionlabs
+export GALILEO_API_KEY="your-api-key"
+```
+
+The new `Client` API requires rc.6 or newer. Put an H.264 MP4 named `video.mp4`
+in the working directory (at most 15 seconds and 50 MiB), and replace the prompt
+below with what your video was meant to show.
+
 ## What Galileo does
 
 Submit a generated video and a prompt; get back the places where the video has
 visual defects and the places where it does not do what the prompt asked.
 
 ```python
-from physionlabs import Galileo
+from physionlabs import Client
 
-galileo = Galileo()  # reads GALILEO_API_KEY
+client = Client()  # reads GALILEO_API_KEY
 
-evaluation = galileo.evaluations.create_and_wait(
-    prompt="A red ball rolls off a table and bounces twice.",
-    video={"url": "https://cdn.example.com/red-ball.mp4"},
+evaluation = client.evaluations.create(
+    model="galileo-1.0",
+    input={
+        "video": {"path": "./video.mp4"},
+        "prompt": "A red ball rolls off a table and bounces twice.",
+    },
 )
 
 # `result` is None on a failed run, so it is worth branching rather than
@@ -33,22 +47,26 @@ else:
 another did not, and `detectors` says which of them to trust. A caller waiting
 for `completed` alone waits forever.
 
-Uploading a local file instead of pointing at a URL — three calls behind one,
-and the bytes are streamed rather than held in memory:
+Uploading separately to reuse a video across evaluations:
 
 ```python
-video = galileo.videos.upload("./clip.mp4")
-evaluation = galileo.evaluations.create_and_wait(
-    prompt="A red ball rolls off a table and bounces twice.",
-    video={"upload_id": video.id},
+video = client.videos.upload("./clip.mp4")
+if video.status.value != "ready":
+    raise ValueError("Video failed validation.")
+evaluation = client.evaluations.create(
+    model="galileo-1.0",
+    input={
+        "video": {"upload_id": video.id},
+        "prompt": "A red ball rolls off a table and bounces twice.",
+    },
 )
 ```
 
 Walking a large account, and retrying what failed:
 
 ```python
-for ev in galileo.evaluations.iterate(status=["failed"]):
-    nxt = galileo.evaluations.retry(ev.id)   # idempotent, unlike create
+for ev in client.evaluations.iterate(status=["failed"]):
+    nxt = client.evaluations.retry(ev.id)   # idempotent, unlike create
     print(ev.id, "->", nxt.id)
 ```
 
@@ -85,3 +103,18 @@ uv run mypy
 [Apache-2.0](LICENSE). Chosen over MIT for the explicit patent grant: MIT is
 silent on patents, which is one more thing for a reviewer to think about, and
 Apache-2.0's retaliation clause protects everyone using it.
+
+
+## Submit without waiting
+
+`Client.evaluations.create()` handles upload, validation, submission and waiting
+for the result. `Client.evaluations.submit()` accepts the same `model` and `input`
+but returns the job ID after submission. A local file still has to finish
+uploading and validating first. Use `retrieve(id)` to read the result later.
+For a hosted video, use `input.video.url` instead of `input.video.path`.
+
+## Migrating from rc.5
+
+Import `Client`, move `video` and `prompt` into `input`, and select
+`galileo-1.0`. Replace create-and-wait with `create`, and submit-only `create`
+with `submit`. The original `Galileo` entry point retains its old behavior.

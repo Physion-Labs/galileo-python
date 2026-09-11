@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterator, Mapping, Sequence
+from pathlib import Path
+from typing import Any, Iterator, Mapping, Sequence, TypedDict, Union
+
+from .videos import Videos
+from ..errors import InvalidRequestError
 
 from .._poll import poll_until
 from .._transport import Transport
@@ -16,11 +20,11 @@ from ..models import Evaluation, EvaluationCounts, EvaluationList
 SETTLED = frozenset({"completed", "partial", "failed"})
 
 
-class Evaluations:
+class EvaluationResource:
     def __init__(self, transport: Transport) -> None:
         self._t = transport
 
-    def create(
+    def _submit_legacy(
         self,
         *,
         video: Mapping[str, Any],
@@ -180,6 +184,138 @@ class Evaluations:
             timeout=timeout,
         )
 
+
+
+def _count_for(counts: EvaluationCounts, status: Sequence[str] | None) -> int:
+    """How many evaluations the census covers, restricted to the statuses asked for.
+
+    ``counts`` ignores ``status`` by design: one census answers both "how much is
+    there" and "how many pages does this filter have", and the second question is
+    this function.
+
+    A status the census does not mention contributes 0 rather than raising -- a
+    deployment that adds a status this client has not heard of should not break
+    paging for a client that is not asking for it.
+    """
+    census: dict[str, int] = {
+        k: v for k, v in counts.model_dump().items() if isinstance(v, int)
+    }
+    keys = list(status) if status else list(census)
+    return sum(census.get(k, 0) for k in keys)
+
+
+class LocalVideo(TypedDict):
+    path: Union[str, Path]
+
+
+class VideoURL(TypedDict):
+    url: str
+
+
+class UploadedVideo(TypedDict):
+    upload_id: str
+
+
+class InlineVideo(TypedDict):
+    b64_json: str
+
+
+VideoInput = Union[LocalVideo, VideoURL, UploadedVideo, InlineVideo]
+
+
+class _RequiredInput(TypedDict):
+    video: VideoInput
+
+
+class EvaluationInput(_RequiredInput, total=False):
+    prompt: str
+
+
+class Evaluations(EvaluationResource):
+    def __init__(self, transport: Transport, videos: Videos) -> None:
+        super().__init__(transport)
+        self._videos = videos
+
+    def submit(
+        self,
+        *,
+        model: str,
+        input: EvaluationInput,
+        model_version: str | None = None,
+        glitch_types: Sequence[str] | None = None,
+        metadata: Mapping[str, Any] | None = None,
+        upload_timeout: float = 600.0,
+    ) -> Evaluation:
+        """Upload a local video if needed, then submit without waiting for evaluation.
+
+        Local uploads must finish validation before submission. ``upload_timeout``
+        bounds the validation wait; HTTP requests use the client's own timeout.
+        """
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError("model must be a non-empty string")
+        if not isinstance(input, Mapping) or set(input) - {"video", "prompt"}:
+            raise ValueError("input must contain video and optionally prompt")
+        if "prompt" in input and not isinstance(input["prompt"], str):
+            raise ValueError("input.prompt must be a string")
+        video = input.get("video")
+        keys = {"path", "url", "upload_id", "b64_json"}
+        if not isinstance(video, Mapping) or len(video) != 1 or not set(video) <= keys:
+            raise ValueError("input.video must contain exactly one of path, url, upload_id, b64_json")
+        kind, value = next(iter(video.items()))
+        if not isinstance(value, (str, Path) if kind == "path" else str) or not str(value):
+            raise ValueError(f"input.video.{kind} must be a non-empty {'path' if kind == 'path' else 'string'}")
+        prepared: dict[str, Any] = dict(video)
+        if kind == "path":
+            uploaded = self._videos.upload(value, timeout=upload_timeout)
+            if uploaded.status.value != "ready":
+                raise InvalidRequestError(
+                    status=422, type="invalid_request_error", code="invalid_video",
+                    message=f"Video {uploaded.id} failed validation: {uploaded.status.value}",
+                )
+            prepared = {"upload_id": uploaded.id}
+        payload: dict[str, Any] = {"model": model, "input": {**input, "video": prepared}}
+        if model_version is not None:
+            payload["model_version"] = model_version
+        if glitch_types is not None:
+            payload["glitch_types"] = list(glitch_types)
+        if metadata is not None:
+            payload["metadata"] = dict(metadata)
+        # A submission is not idempotent; never retry an ambiguous failure.
+        return Evaluation.model_validate(self._t.json(
+            method="POST", path="/v1/evaluations", body=payload, max_retries=0,
+        ))
+
+    def create(
+        self,
+        *,
+        model: str,
+        input: EvaluationInput,
+        model_version: str | None = None,
+        glitch_types: Sequence[str] | None = None,
+        metadata: Mapping[str, Any] | None = None,
+        timeout: float = 600.0,
+        upload_timeout: float = 600.0,
+    ) -> Evaluation:
+        """Upload, submit and wait for completed, partial or failed.
+
+        ``timeout`` bounds evaluation polling after submission. It does not
+        include upload/validation time. A failed evaluation is returned for
+        inspection; upload and HTTP errors raise before an evaluation exists.
+        """
+        queued = self.submit(
+            model=model, input=input, model_version=model_version,
+            glitch_types=glitch_types, metadata=metadata, upload_timeout=upload_timeout,
+        )
+        if queued.status.value in SETTLED:
+            return queued
+        return self.wait_until_settled(queued.id, timeout=timeout)
+
+
+class LegacyEvaluations(EvaluationResource):
+    """Compatibility resource for Galileo. New code should use Client."""
+
+    create = EvaluationResource._submit_legacy
+
     def create_and_wait(
         self,
         *,
@@ -203,7 +339,7 @@ class Evaluations:
         The TypeScript client has always had this — its `params` argument is a
         typed object — so this is also the two clients agreeing.
         """
-        queued = self.create(
+        queued = self._submit_legacy(
             video=video,
             prompt=prompt,
             model=model,
@@ -214,21 +350,3 @@ class Evaluations:
         if queued.status.value in SETTLED:
             return queued
         return self.wait_until_settled(queued.id, timeout=timeout)
-
-
-def _count_for(counts: EvaluationCounts, status: Sequence[str] | None) -> int:
-    """How many evaluations the census covers, restricted to the statuses asked for.
-
-    ``counts`` ignores ``status`` by design: one census answers both "how much is
-    there" and "how many pages does this filter have", and the second question is
-    this function.
-
-    A status the census does not mention contributes 0 rather than raising -- a
-    deployment that adds a status this client has not heard of should not break
-    paging for a client that is not asking for it.
-    """
-    census: dict[str, int] = {
-        k: v for k, v in counts.model_dump().items() if isinstance(v, int)
-    }
-    keys = list(status) if status else list(census)
-    return sum(census.get(k, 0) for k in keys)

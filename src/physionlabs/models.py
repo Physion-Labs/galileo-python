@@ -10,8 +10,12 @@ from typing import Annotated, Any, Dict, Literal
 
 
 class ModelId(Enum):
+    """
+    Galileo 1.0. The legacy name galileo remains accepted.
+    """
+
+    galileo_1_0 = 'galileo-1.0'
     galileo = 'galileo'
-    gemini = 'gemini'
 
 
 class GlitchType(Enum):
@@ -50,6 +54,15 @@ class ContentType(Enum):
     video_mp4 = 'video/mp4'
 
 
+class Container(Enum):
+    """
+    What the container really is, from its `ftyp` brand. Send it when you know: a QuickTime (`.mov`) file renamed to `.mp4` is named in the refusal it produces, which is otherwise very hard to act on.
+    """
+
+    mp4 = 'mp4'
+    quicktime = 'quicktime'
+
+
 class VideoCreate(BaseModel):
     model_config = ConfigDict(
         extra='ignore',
@@ -68,7 +81,7 @@ class VideoCreate(BaseModel):
     """
     duration_sec: float | None = None
     """
-    Optional metadata recorded on the video.
+    Length of the clip in seconds. Recorded on the video, and CHECKED: a value over the 15-second analysis limit is refused here rather than later, when there is still a file in front of you to trim.
     """
     width: int | None = None
     """
@@ -77,6 +90,15 @@ class VideoCreate(BaseModel):
     height: int | None = None
     """
     Optional metadata recorded on the video.
+    """
+    codec: str | None = None
+    """
+    The video sample format from the file's own header -- the four-character tag in the container's sample description, such as `avc1` (H.264), `hvc1` (H.265) or `av01` (AV1). ffprobe's spelling (`h264`, `hevc`, `av1`) is understood too.
+    Optional, and worth sending: only H.264 can be analyzed, and a codec named here that cannot be is refused before a record exists or an upload slot is spent. A codec we do not recognise is never a refusal -- it simply proceeds to the server-side check on `complete`.
+    """
+    container: Container | None = None
+    """
+    What the container really is, from its `ftyp` brand. Send it when you know: a QuickTime (`.mov`) file renamed to `.mp4` is named in the refusal it produces, which is otherwise very hard to act on.
     """
 
 
@@ -151,7 +173,48 @@ class VideoUploadRef(BaseModel):
     """
 
 
+class EvaluationRequestInput(BaseModel):
+    model_config = ConfigDict(
+        extra='ignore',
+    )
+    video: VideoUrlRef | VideoUploadRef | VideoBase64Ref
+    """
+    How to give us the video. Exactly one of the three, and the choice is mostly about size.
+    `upload_id` is the general answer: upload the file first (three calls, one of them straight to storage -- see `POST /v1/videos`) and reference it here. It is the only option that both reaches the 50 MB file limit and keeps the video private to your account.
+    `url` is the shortcut when the video is already hosted somewhere we can GET. Note that it has to be publicly reachable; we send no credentials.
+    `b64_json` sends the bytes inline. Convenient for a small local file, but bounded by the request body limit rather than the file limit -- see `POST /v1/evaluations`.
+    """
+    prompt: str | None = None
+    """
+    What the video was meant to show. Omit it for visual-glitch detection only. A nonblank prompt also enables prompt alignment by default.
+    """
+
+
 class EvaluationCreate(BaseModel):
+    model_config = ConfigDict(
+        extra='ignore',
+    )
+    model: ModelId
+    input: EvaluationRequestInput
+    model_version: str | None = None
+    """
+    Optional concrete serving version pin; separate from the public model name.
+    """
+    glitch_types: list[GlitchType] | None = None
+    """
+    Detectors to run. Defaults to those supported by the supplied prompt.
+    """
+    metadata: dict[str, Any] | None = None
+    """
+    JSON metadata echoed on the evaluation; at most 8192 serialized bytes.
+    """
+
+
+class LegacyEvaluationCreate(BaseModel):
+    """
+    Legacy flat request body. New clients should use model and input.
+    """
+
     model_config = ConfigDict(
         extra='ignore',
     )
@@ -160,9 +223,13 @@ class EvaluationCreate(BaseModel):
     """
     Concrete model version to run. The deployment default applies when omitted.
     """
-    prompt: str
+    prompt: str | None = None
     """
-    What the video was meant to show. REQUIRED as of 2026-08-27 (previously optional, defaulting to ""); empty or whitespace-only is refused with `missing_prompt`.
+    What the video was meant to show. OPTIONAL, and what it decides is which detectors run: send one and the clip is checked against it, omit it (or send an empty or whitespace-only string) and only `visual_glitch` runs. The run is priced accordingly — one detector instead of two — so an unprompted submission costs less.
+
+    It was REQUIRED between 2026-08-27 and 2026-08-30, refusing a blank value with `missing_prompt`. That is reverted: a clip you want checked for visual defects needed a sentence invented for it, and the invented sentence was then measured against the clip by `prompt_misalignment` and billed for.
+
+    Not trimmed on storage — `prompt_segment.char_start` indexes into it as sent and reports quote it back. Only the emptiness test trims.
     """
     video: VideoUrlRef | VideoUploadRef | VideoBase64Ref
     """
@@ -172,6 +239,11 @@ class EvaluationCreate(BaseModel):
     `b64_json` sends the bytes inline. Convenient for a small local file, but bounded by the request body limit rather than the file limit -- see `POST /v1/evaluations`.
     """
     glitch_types: list[GlitchType] | None = None
+    """
+    Which detectors to run. When omitted the server derives the list from the prompt: `[visual_glitch, prompt_misalignment]` with one, `[visual_glitch]` without.
+
+    There is no fixed default any more. Naming `prompt_misalignment` without a prompt is refused with `missing_prompt` rather than silently narrowed — a run billed for a detector it did not include is not one the caller can check.
+    """
     metadata: dict[str, Any] | None = None
     """
     JSON metadata echoed on the evaluation. Serialized size must not exceed 8192 bytes.
@@ -212,7 +284,13 @@ class GlitchRegion(BaseModel):
     )
     start: TimePoint
     end: TimePoint
-    boxes: list[BoxKeyframe]
+    boxes: list[BoxKeyframe] | None = None
+    """
+    The per-frame track.
+    An EMPTY array is the model's own answer: it located this finding in time but not in frame, which is a real finding and not an error.
+    ABSENT is a different statement -- this response does not carry the track. Only `GET /v1/evaluations` asked for with `?omit=boxes` answers that way; a create and a retrieve always carry it. Do not render "no box" for the absent case.
+    `start` and `end` are required either way, so a finding can always be placed in time.
+    """
 
 
 class PromptSegment(BaseModel):
@@ -271,6 +349,12 @@ class PromptMisalignment(BaseModel):
 
 
 class EvaluationSummary(BaseModel):
+    """
+    Counts over the findings this run REPORTED. `false` means "this detector reported nothing", which is not the same as "this detector found nothing": a run submitted without a prompt does not run `prompt_misalignment` at all, and reports `has_prompt_misalignment: false` exactly as a run that checked and found the prompt fully delivered does.
+
+    `detectors[]` is the field that tells those apart, and is the one to read before presenting either as a verdict. These two booleans are kept as required non-nullable for compatibility — every existing consumer reads them as plain booleans — rather than growing a third state here.
+    """
+
     model_config = ConfigDict(
         extra='ignore',
     )
@@ -413,7 +497,10 @@ class ModelBuild(BaseModel):
     model_config = ConfigDict(
         extra='ignore',
     )
-    id: ModelId
+    id: str
+    """
+    Deployment build identifier; distinct from the public model name.
+    """
     label: str
     version: str | None
     """
@@ -430,7 +517,6 @@ class Input1(BaseModel):
     formats: list[str]
     max_duration_sec: float
     max_file_bytes: int
-    aspect_ratios: list[str]
 
 
 class Model(BaseModel):
@@ -531,6 +617,7 @@ class ErrorCode(Enum):
     missing_video = 'missing_video'
     missing_prompt = 'missing_prompt'
     prompt_too_long = 'prompt_too_long'
+    prompt_refused = 'prompt_refused'
     invalid_glitch_types = 'invalid_glitch_types'
     video_too_long = 'video_too_long'
     invalid_video = 'invalid_video'
@@ -607,6 +694,11 @@ class Evaluation(BaseModel):
     video_id: str | None = None
     """
     Stored video identifier when the evaluation used an uploaded video.
+    """
+    video_url: str | None = None
+    """
+    The hosted url the evaluation analysed, when it was submitted with `video.url`. The counterpart to `video_id`: exactly one of the two is set, and both are null for an inline (`b64_json`) run.
+    It is the url you sent, recorded so the run can say what it judged -- not a promise that it still resolves. Absent on runs filed before this field existed, and not recoverable for them.
     """
     attempt: int | None = None
     """
