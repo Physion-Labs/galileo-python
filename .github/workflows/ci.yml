@@ -9,6 +9,16 @@ on:
   # on its own schedule; a contract check that can only run when the SDK changes
   # would notice a drift on whatever day someone next touched the SDK.
   workflow_dispatch:
+    inputs:
+      verify_client:
+        description: Run two real evaluations to verify the release workflows
+        type: boolean
+        default: false
+      base_url:
+        description: Deployment to verify
+        type: choice
+        options: [https://api-dev.physionlabs.ai, https://api.physionlabs.ai]
+        default: https://api-dev.physionlabs.ai
 
 jobs:
   test:
@@ -64,7 +74,7 @@ jobs:
   # contract, so it runs on every change and is read rather than gated on.
   live:
     runs-on: ubuntu-latest
-    continue-on-error: true
+    continue-on-error: ${{ !(github.event_name == 'workflow_dispatch' && inputs.verify_client) }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -90,7 +100,7 @@ jobs:
       - name: Contract against the live service
         env:
           GALILEO_API_KEY: ${{ secrets.GALILEO_CI_API_KEY }}
-          GALILEO_BASE_URL: https://api-dev.physionlabs.ai
+          GALILEO_BASE_URL: ${{ inputs.base_url || 'https://api-dev.physionlabs.ai' }}
         run: |
           set +e
           uv run python scripts/verify_live.py
@@ -102,3 +112,11 @@ jobs:
             *) echo "::error title=Contract mismatch::The live service does not match the contract."
                exit 1 ;;
           esac
+
+      - name: Verify Client workflows with real evaluations
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.verify_client }}
+        env:
+          GALILEO_API_KEY: ${{ secrets.GALILEO_CI_API_KEY }}
+          GALILEO_BASE_URL: ${{ inputs.base_url }}
+          GALILEO_TEST_VIDEO_URL: https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/tests/fixtures/release.mp4
+        run: uv run python scripts/verify_client.py

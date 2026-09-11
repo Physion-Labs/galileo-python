@@ -112,12 +112,13 @@ def test_the_submit_methods_name_their_parameters():
     Asserted rather than trusted because `**kwargs` is the easy way to add a
     parameter and it costs exactly this each time.
     """
-    from physionlabs.resources.evaluations import Evaluations
+    from physionlabs.resources.evaluations import Evaluations, LegacyEvaluations
     from physionlabs.resources.videos import Videos
 
     for cls, name, expected in (
-        (Evaluations, "create", {"video", "prompt", "model", "model_version", "glitch_types", "metadata"}),
-        (Evaluations, "create_and_wait", {"video", "prompt", "model", "model_version", "glitch_types", "metadata", "timeout"}),
+        (Evaluations, "create", {"input", "model", "model_version", "glitch_types", "metadata", "timeout", "upload_timeout"}),
+        (Evaluations, "submit", {"input", "model", "model_version", "glitch_types", "metadata", "upload_timeout"}),
+        (LegacyEvaluations, "create_and_wait", {"video", "prompt", "model", "model_version", "glitch_types", "metadata", "timeout"}),
         (Evaluations, "list", {"limit", "offset", "video_id", "status"}),
         (Videos, "upload", {"path", "dedupe", "wait", "timeout"}),
     ):

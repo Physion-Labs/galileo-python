@@ -96,7 +96,10 @@ class Videos:
 
         # The server already held this content: nothing to send, nothing to wait for.
         if reserved.skip_upload or not reserved.upload_path:
-            return self.retrieve(reserved.video_id)
+            existing = self.retrieve(reserved.video_id)
+            if not wait or existing.status.value in SETTLED:
+                return existing
+            return self.wait_until_ready(reserved.video_id, timeout=timeout)
 
         # 2. Send the bytes -- to storage, NOT to the API. No Authorization
         #    header: that host never needed the key, and a key sent to a host that

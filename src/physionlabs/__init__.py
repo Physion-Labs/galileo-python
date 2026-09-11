@@ -1,11 +1,14 @@
 """physionlabs -- official Python client for the Galileo video evaluation API.
 
-    from physionlabs import Galileo
+    from physionlabs import Client
 
-    galileo = Galileo()
-    evaluation = galileo.evaluations.create_and_wait(
-        prompt="A red ball rolls off a table and bounces twice.",
-        video={"url": "https://cdn.example.com/red-ball.mp4"},
+    client = Client()
+    evaluation = client.evaluations.create(
+        model="galileo-1.0",
+        input={
+            "video": {"url": "https://cdn.example.com/red-ball.mp4"},
+            "prompt": "A red ball rolls off a table and bounces twice.",
+        },
     )
 
 The response models in `physionlabs.models` are GENERATED from the API's OpenAPI
@@ -19,7 +22,8 @@ from __future__ import annotations
 
 from importlib.metadata import version as _metadata_version
 
-from ._client import DEFAULT_BASE_URL, Galileo
+from ._client import DEFAULT_BASE_URL, Client, Galileo
+from .resources.evaluations import EvaluationInput, VideoInput
 from .errors import (
     APIError,
     AuthenticationError,
@@ -61,6 +65,9 @@ from .models import (
 __version__ = _metadata_version("physionlabs")
 
 __all__ = [
+    "Client",
+    "EvaluationInput",
+    "VideoInput",
     "Galileo",
     "DEFAULT_BASE_URL",
     "__version__",
