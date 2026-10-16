@@ -92,6 +92,7 @@ class Transport:
         content_length: int | None = None,
         anonymous: bool = False,
         max_retries: int | None = None,
+        timeout: float | None = None,
     ) -> httpx.Response:
         if absolute_url is None and path is None:
             raise ValueError("a request needs either `path` or `absolute_url`")
@@ -120,6 +121,7 @@ class Transport:
                 body=body,
                 content=content,
                 retries=retries,
+                timeout=self._timeout if timeout is None else timeout,
             )
 
     def _attempt(
@@ -132,6 +134,7 @@ class Transport:
         body: Any,
         content: Any,
         retries: int,
+        timeout: float,
     ) -> httpx.Response:
         rate_limit_spent = 0.0
         rate_limited = 0
@@ -147,7 +150,7 @@ class Transport:
                     params=query or None,
                     json=body if content is None else None,
                     content=content,
-                    timeout=self._timeout,
+                    timeout=timeout,
                 )
             except httpx.HTTPError as exc:
                 # A streamed body cannot be replayed -- the file position has

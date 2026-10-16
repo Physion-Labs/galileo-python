@@ -23,7 +23,7 @@ from __future__ import annotations
 from importlib.metadata import version as _metadata_version
 
 from ._client import DEFAULT_BASE_URL, Client, Galileo
-from .resources.evaluations import EvaluationInput, VideoInput
+from .resources.evaluations import EvaluationInput, EvaluationWithRaw, VideoInput
 from .errors import (
     APIError,
     AuthenticationError,
@@ -32,8 +32,10 @@ from .errors import (
     InsufficientCreditsError,
     InvalidRequestError,
     NotFoundError,
+    PermissionDeniedError,
     PollTimeoutError,
     RateLimitError,
+    RawOutputsError,
     ServerError,
 )
 from .models import (
@@ -67,6 +69,7 @@ __version__ = _metadata_version("physionlabs")
 __all__ = [
     "Client",
     "EvaluationInput",
+    "EvaluationWithRaw",
     "VideoInput",
     "Galileo",
     "DEFAULT_BASE_URL",
@@ -77,6 +80,8 @@ __all__ = [
     "InvalidRequestError",
     "AuthenticationError",
     "NotFoundError",
+    "PermissionDeniedError",
+    "RawOutputsError",
     "InsufficientCreditsError",
     "RateLimitError",
     "ServerError",

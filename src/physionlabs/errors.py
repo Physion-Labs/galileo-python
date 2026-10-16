@@ -17,12 +17,14 @@ __all__ = [
     "APIError",
     "InvalidRequestError",
     "AuthenticationError",
+    "PermissionDeniedError",
     "NotFoundError",
     "InsufficientCreditsError",
     "RateLimitError",
     "ServerError",
     "ConnectionError",
     "PollTimeoutError",
+    "RawOutputsError",
     "error_from_response",
 ]
 
@@ -62,6 +64,15 @@ class InvalidRequestError(APIError):
 
 class AuthenticationError(APIError):
     """The key is missing, malformed, or revoked."""
+
+
+class PermissionDeniedError(AuthenticationError):
+    """The key is valid, but this account may not do this (403).
+
+    A subclass of ``AuthenticationError`` so code that already catches that keeps
+    working. Raw model outputs are the case it exists for: they are internal by
+    default, and an account without the ``raw_outputs`` capability is refused.
+    """
 
 
 class NotFoundError(APIError):
@@ -106,11 +117,25 @@ class PollTimeoutError(GalileoError):
     """
 
 
+class RawOutputsError(GalileoError):
+    """The evaluation settled, but its raw outputs could not be fetched.
+
+    Raised by ``output_raw=True``. The evaluation itself is on ``evaluation``:
+    the run happened and was paid for, so failing to fetch the extra payload must
+    not cost the caller the result. The underlying ``APIError`` is ``__cause__``
+    -- a ``PermissionDeniedError`` when the account lacks ``raw_outputs``.
+    """
+
+    def __init__(self, message: str, *, evaluation: Any) -> None:
+        super().__init__(message)
+        self.evaluation = evaluation
+
+
 _BY_STATUS: dict[int, type[APIError]] = {
     400: InvalidRequestError,
     401: AuthenticationError,
     402: InsufficientCreditsError,
-    403: AuthenticationError,
+    403: PermissionDeniedError,
     404: NotFoundError,
     413: InvalidRequestError,
     422: InvalidRequestError,
