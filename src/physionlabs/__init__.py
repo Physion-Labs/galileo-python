@@ -23,7 +23,7 @@ from __future__ import annotations
 from importlib.metadata import version as _metadata_version
 
 from ._client import DEFAULT_BASE_URL, Client, Galileo
-from .resources.evaluations import EvaluationInput, VideoInput
+from .resources.evaluations import EvaluationInput, EvaluationWithRaw, VideoInput
 from .errors import (
     APIError,
     AuthenticationError,
@@ -67,6 +67,7 @@ __version__ = _metadata_version("physionlabs")
 __all__ = [
     "Client",
     "EvaluationInput",
+    "EvaluationWithRaw",
     "VideoInput",
     "Galileo",
     "DEFAULT_BASE_URL",

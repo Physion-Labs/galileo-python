@@ -19,6 +19,16 @@ from ..models import Evaluation, EvaluationCounts, EvaluationList
 # trust -- so a caller waiting for `completed` alone waits forever.
 SETTLED = frozenset({"completed", "partial", "failed"})
 
+# Raw outputs are several MB and the first fetch may be slow.
+RAW_TIMEOUT = 300.0
+
+
+class EvaluationWithRaw(Evaluation):
+    """An evaluation plus its raw model outputs. Internal accounts only."""
+
+    raw: dict[str, Any] | None = None
+    raw_pruned: bool = False
+
 
 class EvaluationResource:
     def __init__(self, transport: Transport) -> None:
@@ -76,10 +86,24 @@ class EvaluationResource:
             )
         )
 
-    def retrieve(self, evaluation_id: str) -> Evaluation:
-        return Evaluation.model_validate(
+    def retrieve(self, evaluation_id: str, *, output_raw: bool = False) -> Evaluation:
+        ev = Evaluation.model_validate(
             self._t.json(method="GET", path=f"/v1/evaluations/{evaluation_id}")
         )
+        return self._with_raw(ev) if output_raw else ev
+
+    def raw(self, evaluation_id: str) -> tuple[dict[str, Any], bool]:
+        """Raw model outputs and whether they were pruned. Internal accounts only."""
+        response = self._t.send(
+            method="GET", path=f"/v1/evaluations/{evaluation_id}/raw", timeout=RAW_TIMEOUT,
+        )
+        return response.json(), response.headers.get("x-raw-outputs") == "pruned"
+
+    def _with_raw(self, ev: Evaluation) -> EvaluationWithRaw:
+        out = EvaluationWithRaw.model_validate(ev.model_dump())
+        if ev.status.value != "failed":
+            out.raw, out.raw_pruned = self.raw(ev.id)
+        return out
 
     def list(
         self,
@@ -174,15 +198,18 @@ class EvaluationResource:
     def delete(self, evaluation_id: str) -> None:
         self._t.send(method="DELETE", path=f"/v1/evaluations/{evaluation_id}")
 
-    def wait_until_settled(self, evaluation_id: str, *, timeout: float = 600.0) -> Evaluation:
+    def wait_until_settled(
+        self, evaluation_id: str, *, timeout: float = 600.0, output_raw: bool = False,
+    ) -> Evaluation:
         """Poll an existing evaluation until it stops changing."""
-        return poll_until(
+        ev = poll_until(
             lambda: self.retrieve(evaluation_id),
             lambda ev: ev.status.value in SETTLED,
             describe=f"evaluation {evaluation_id}",
             status_of=lambda ev: ev.status.value,
             timeout=timeout,
         )
+        return self._with_raw(ev) if output_raw else ev
 
 
 
@@ -295,20 +322,22 @@ class Evaluations(EvaluationResource):
         metadata: Mapping[str, Any] | None = None,
         timeout: float = 600.0,
         upload_timeout: float = 600.0,
+        output_raw: bool = False,
     ) -> Evaluation:
         """Upload, submit and wait for completed, partial or failed.
 
         ``timeout`` bounds evaluation polling after submission. It does not
         include upload/validation time. A failed evaluation is returned for
         inspection; upload and HTTP errors raise before an evaluation exists.
+        ``output_raw=True`` also returns the raw model outputs (internal only).
         """
         queued = self.submit(
             model=model, input=input, model_version=model_version,
             glitch_types=glitch_types, metadata=metadata, upload_timeout=upload_timeout,
         )
         if queued.status.value in SETTLED:
-            return queued
-        return self.wait_until_settled(queued.id, timeout=timeout)
+            return self._with_raw(queued) if output_raw else queued
+        return self.wait_until_settled(queued.id, timeout=timeout, output_raw=output_raw)
 
 
 class LegacyEvaluations(EvaluationResource):
