@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Iterator, Mapping, Sequence, TypedDict, Union
 
 from .videos import Videos
-from ..errors import APIError, InvalidRequestError, RawOutputsError
+from ..errors import InvalidRequestError
 
 from .._poll import poll_until
 from .._transport import Transport
@@ -19,31 +19,15 @@ from ..models import Evaluation, EvaluationCounts, EvaluationList
 # trust -- so a caller waiting for `completed` alone waits forever.
 SETTLED = frozenset({"completed", "partial", "failed"})
 
-# Raw outputs are megabytes, and the first request for a run may make the API
-# fetch them from the model server before answering, so they get a longer
-# per-request timeout than the client's default.
+# Raw outputs are several MB and the first fetch may be slow.
 RAW_TIMEOUT = 300.0
 
 
 class EvaluationWithRaw(Evaluation):
-    """An evaluation with its raw model outputs attached (``output_raw=True``).
-
-    INTERNAL. ``raw`` is ``GET /v1/evaluations/{id}/raw``: every candidate the
-    proposal leg produced, every verdict including dismissals, the misalignment
-    leg's own output, and the pipeline's intermediates (object and text
-    tracklets, shots, inventory, boxes). Only accounts with the ``raw_outputs``
-    capability may read it; others get :class:`PermissionDeniedError`.
-
-    Defined here rather than in ``models`` because that module is generated from
-    the public contract, and ``/raw`` is deliberately not in it.
-    """
+    """An evaluation plus its raw model outputs. Internal accounts only."""
 
     raw: dict[str, Any] | None = None
-    """The raw payload as returned, untyped: it is large and its shape follows
-    the model server, not the public contract. None on a failed evaluation."""
     raw_pruned: bool = False
-    """True when the model server had already discarded this run's outputs; the
-    payload then carries ``archived`` and no outputs."""
 
 
 class EvaluationResource:
@@ -103,39 +87,22 @@ class EvaluationResource:
         )
 
     def retrieve(self, evaluation_id: str, *, output_raw: bool = False) -> Evaluation:
-        """One evaluation. ``output_raw=True`` also attaches its raw outputs
-        (internal accounts only) -- see :class:`EvaluationWithRaw`."""
         ev = Evaluation.model_validate(
             self._t.json(method="GET", path=f"/v1/evaluations/{evaluation_id}")
         )
-        return self._attach_raw(ev) if output_raw else ev
+        return self._with_raw(ev) if output_raw else ev
 
-    def raw(self, evaluation_id: str, *, timeout: float = RAW_TIMEOUT) -> tuple[dict[str, Any], bool]:
-        """The raw model outputs of one evaluation, and whether they were pruned.
-
-        INTERNAL: raises :class:`PermissionDeniedError` for an account without
-        the ``raw_outputs`` capability, and :class:`NotFoundError` for a run that
-        never had any (one not served by our own model).
-        """
+    def raw(self, evaluation_id: str) -> tuple[dict[str, Any], bool]:
+        """Raw model outputs and whether they were pruned. Internal accounts only."""
         response = self._t.send(
-            method="GET", path=f"/v1/evaluations/{evaluation_id}/raw", timeout=timeout,
+            method="GET", path=f"/v1/evaluations/{evaluation_id}/raw", timeout=RAW_TIMEOUT,
         )
-        pruned = response.headers.get("x-raw-outputs") == "pruned"
-        return response.json(), pruned
+        return response.json(), response.headers.get("x-raw-outputs") == "pruned"
 
-    def _attach_raw(self, ev: Evaluation) -> EvaluationWithRaw:
-        out = EvaluationWithRaw.model_validate(ev.model_dump(mode="python"))
-        # A failed run produced nothing worth fetching.
-        if ev.status.value not in {"completed", "partial"}:
-            return out
-        try:
+    def _with_raw(self, ev: Evaluation) -> EvaluationWithRaw:
+        out = EvaluationWithRaw.model_validate(ev.model_dump())
+        if ev.status.value != "failed":
             out.raw, out.raw_pruned = self.raw(ev.id)
-        except APIError as exc:
-            raise RawOutputsError(
-                f"evaluation {ev.id} settled as {ev.status.value}, but its raw outputs "
-                f"could not be fetched: {exc}",
-                evaluation=out,
-            ) from exc
         return out
 
     def list(
@@ -234,10 +201,7 @@ class EvaluationResource:
     def wait_until_settled(
         self, evaluation_id: str, *, timeout: float = 600.0, output_raw: bool = False,
     ) -> Evaluation:
-        """Poll an existing evaluation until it stops changing.
-
-        With ``output_raw=True`` the raw outputs are fetched ONCE, after it settles,
-        not on every poll."""
+        """Poll an existing evaluation until it stops changing."""
         ev = poll_until(
             lambda: self.retrieve(evaluation_id),
             lambda ev: ev.status.value in SETTLED,
@@ -245,7 +209,7 @@ class EvaluationResource:
             status_of=lambda ev: ev.status.value,
             timeout=timeout,
         )
-        return self._attach_raw(ev) if output_raw else ev
+        return self._with_raw(ev) if output_raw else ev
 
 
 
@@ -365,18 +329,14 @@ class Evaluations(EvaluationResource):
         ``timeout`` bounds evaluation polling after submission. It does not
         include upload/validation time. A failed evaluation is returned for
         inspection; upload and HTTP errors raise before an evaluation exists.
-
-        ``output_raw=True`` (internal accounts only) returns an
-        :class:`EvaluationWithRaw` with the raw model outputs -- every candidate,
-        every verdict, and the tracklets -- on ``raw``. If they cannot be fetched,
-        :class:`RawOutputsError` is raised with the evaluation on ``.evaluation``.
+        ``output_raw=True`` also returns the raw model outputs (internal only).
         """
         queued = self.submit(
             model=model, input=input, model_version=model_version,
             glitch_types=glitch_types, metadata=metadata, upload_timeout=upload_timeout,
         )
         if queued.status.value in SETTLED:
-            return self._attach_raw(queued) if output_raw else queued
+            return self._with_raw(queued) if output_raw else queued
         return self.wait_until_settled(queued.id, timeout=timeout, output_raw=output_raw)
 
 

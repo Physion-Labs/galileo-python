@@ -32,10 +32,8 @@ from .errors import (
     InsufficientCreditsError,
     InvalidRequestError,
     NotFoundError,
-    PermissionDeniedError,
     PollTimeoutError,
     RateLimitError,
-    RawOutputsError,
     ServerError,
 )
 from .models import (
@@ -80,8 +78,6 @@ __all__ = [
     "InvalidRequestError",
     "AuthenticationError",
     "NotFoundError",
-    "PermissionDeniedError",
-    "RawOutputsError",
     "InsufficientCreditsError",
     "RateLimitError",
     "ServerError",
