@@ -96,6 +96,16 @@ def test_create_returns_every_terminal_status(status):
     assert len(rec.calls) == 2
 
 
+def test_create_waits_through_pending_clip():
+    # The server accepts a submission before its clip is ready and answers
+    # `pending_clip`; rc7 rejected that response in validation.
+    rec = Recorder(ok(evaluation("pending_clip"), 201), ok(evaluation("queued")), ok(evaluation()))
+    with client(rec) as c:
+        result = c.evaluations.create(model="galileo-1.0", input={"video": {"upload_id": "vid_1"}})
+    assert result.status.value == "completed"
+    assert len(rec.of("POST")) == 1
+
+
 def test_poll_timeout_preserves_id_and_does_not_resubmit():
     rec = Recorder(ok(evaluation("queued")), ok(evaluation("processing")))
     with client(rec) as c, pytest.raises(PollTimeoutError, match=evaluation()["id"]):
