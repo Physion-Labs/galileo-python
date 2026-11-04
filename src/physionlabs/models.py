@@ -24,6 +24,7 @@ class GlitchType(Enum):
 
 
 class EvaluationStatus(Enum):
+    pending_clip = 'pending_clip'
     queued = 'queued'
     processing = 'processing'
     completed = 'completed'
@@ -48,10 +49,12 @@ class VideoStatus(Enum):
 
 class ContentType(Enum):
     """
-    Only MP4 is accepted.
+    MP4, QuickTime (.mov) or WebM. The video inside must be H.264, H.265 (HEVC) or VP9.
     """
 
     video_mp4 = 'video/mp4'
+    video_quicktime = 'video/quicktime'
+    video_webm = 'video/webm'
 
 
 class Container(Enum):
@@ -69,7 +72,7 @@ class VideoCreate(BaseModel):
     )
     content_type: ContentType
     """
-    Only MP4 is accepted.
+    MP4, QuickTime (.mov) or WebM. The video inside must be H.264, H.265 (HEVC) or VP9.
     """
     size_bytes: int
     """
@@ -159,7 +162,7 @@ class VideoBase64Ref(BaseModel):
     b64_json: str = Field(..., json_schema_extra={'contentEncoding': 'base64'})
     """
     Base64-encoded MP4 bytes, sent inline with the request.
-    Bounded by the 2 MB request body limit, not by the 50 MB file limit: base64 costs a third more than the bytes it carries, so the largest clip that fits inline is roughly 1.5 MB. That is well under a typical 15-second render. Use `url` for anything larger -- a body over the limit is rejected with 413, which is a transport failure rather than a validation one and so is not in this endpoint's error list.
+    Bounded by the 2 MB request body limit, not by the 50 MB file limit: base64 costs a third more than the bytes it carries, so the largest clip that fits inline is roughly 1.5 MB. That is well under a typical 15-second render. Use `url` for anything larger -- a body over the limit is rejected with 413 `body_too_large`, which is raised by the body parser before any route runs. It is therefore not in this endpoint's error list: it can come back from any endpoint that takes a body, and it is permanent, so a retry of the same request is refused identically.
     """
 
 
@@ -186,7 +189,7 @@ class EvaluationRequestInput(BaseModel):
     """
     prompt: str | None = None
     """
-    What the video was meant to show. Omit it for visual-glitch detection only. A nonblank prompt also enables prompt alignment by default.
+    What the video was meant to show. Omit it for visual-glitch detection only. A nonblank prompt also enables prompt alignment by default. Up to 500 words (whitespace-delimited); no `maxLength` is declared because the limit is counted in words, not characters.
     """
 
 
@@ -225,7 +228,7 @@ class LegacyEvaluationCreate(BaseModel):
     """
     prompt: str | None = None
     """
-    What the video was meant to show. OPTIONAL, and what it decides is which detectors run: send one and the clip is checked against it, omit it (or send an empty or whitespace-only string) and only `visual_glitch` runs. The run is priced accordingly — one detector instead of two — so an unprompted submission costs less.
+    What the video was meant to show. OPTIONAL, and what it decides is which detectors run: send one and the clip is checked against it, omit it (or send an empty or whitespace-only string) and only `visual_glitch` runs. The run is priced accordingly — one detector instead of two — so an unprompted submission costs less. Up to 500 words (whitespace-delimited); no `maxLength` is declared because the limit is counted in words, not characters.
 
     It was REQUIRED between 2026-08-27 and 2026-08-30, refusing a blank value with `missing_prompt`. That is reverted: a clip you want checked for visual defects needed a sentence invented for it, and the invented sentence was then measured against the clip by `prompt_misalignment` and billed for.
 
@@ -383,6 +386,17 @@ class Timing(BaseModel):
     Milliseconds from submission to the terminal answer, measured by the service. This is what you waited: it includes our queueing, fetching the video, and the model's own time.
     One number rather than a breakdown, deliberately. The finer measurements are the model server's own clock in its own units, and a number read from the wrong level is wrong by three orders of magnitude rather than plausibly close.
     """
+    mock: dict[str, float] | None = None
+    """
+    Present ONLY on a synthetic run — one submitted against the ideal-model mock — and absent from every real evaluation. It reports what the mock measured about the record it generated: `record_bytes`, the serialized size of that record, and `hold_s`, the delay the request asked it to wait.
+    Here because a capacity measurement has to state the payload distribution it actually saw beside whatever ceiling it found, and deriving that from the request's knobs afterwards is the wrong way round: the knobs are a range, the run had a value.
+    """
+    served: dict[str, float] | None = None
+    """
+    Present ONLY on a synthetic run, alongside `mock`, and absent from every real evaluation. Where that run's time went according to the stand-in that served it: `took_s`, `admission_wait_s`, `e2e_wall_s`, `work_s`, `concurrency`.
+    SECONDS, on a different clock from `e2e_ms` above, which is why they are nested here rather than listed beside it. Each is smaller than `e2e_ms`, so quoting one of them as how long a run took understates the wait by exactly the queue.
+    A real evaluation reports `e2e_ms` alone. These are here so a capacity measurement can attribute latency by layer — the gap between our clock and the server's is only computable when both are reported — and that is a question about our own pipeline rather than about a customer's run.
+    """
 
 
 class EvaluationUsage(BaseModel):
@@ -440,6 +454,7 @@ class EvaluationCounts(BaseModel):
     __annotations__ = {
         '__pydantic_extra__': Dict[str, int],
     }
+    pending_clip: int | None = None
     queued: int | None = None
     processing: int | None = None
     completed: int | None = None
@@ -633,6 +648,7 @@ class ErrorCode(Enum):
     invalid_glitch_types = 'invalid_glitch_types'
     video_too_long = 'video_too_long'
     invalid_video = 'invalid_video'
+    body_too_large = 'body_too_large'
     not_found = 'not_found'
     not_implemented = 'not_implemented'
     insufficient_credits = 'insufficient_credits'
@@ -643,6 +659,7 @@ class ErrorCode(Enum):
     concurrency_limit = 'concurrency_limit'
     internal_error = 'internal_error'
     model_unavailable = 'model_unavailable'
+    video_unfetchable = 'video_unfetchable'
     model_output_invalid = 'model_output_invalid'
     model_timeout = 'model_timeout'
     run_abandoned = 'run_abandoned'
@@ -718,7 +735,7 @@ class Evaluation(BaseModel):
     """
     timing: Timing | None = None
     """
-    How long this run took. NULL when nothing was measured -- which is every run settled before it was recorded, and is not backfillable.
+    How long this run took. NULL when nothing was measured -- which is every run settled before it was recorded, and is not backfillable -- and NULL for every account that is not one of Physion's own: the run's measured duration is internal and is not returned to customers.
     Null and never 0. A run whose latency nobody recorded and a run that took no time are different claims, and only one of them is true.
     NOT in `required`, for the same reason `error` is not: during a rolling deploy some tasks are still the older build, and a response from one of those carries no such key. A client that enforces the contract at runtime -- the Python one does -- would raise on those responses, and it would raise only during a deploy, which is the worst time to be debugging a client. Test for a VALUE, not for the key.
     """

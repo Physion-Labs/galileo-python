@@ -126,8 +126,9 @@ def test_a_run_says_how_long_it_took():
     evaluation = Evaluation.model_validate(fixture("evaluation_completed"))
     assert evaluation.timing is not None
     assert evaluation.timing.e2e_ms == 43000
-    # One number, so a caller cannot reach for the model server's clock by mistake.
-    assert set(evaluation.timing.model_dump().keys()) == {"e2e_ms"}
+    # One number on a real run, so a caller cannot reach for the model server's
+    # clock by mistake. `mock` and `served` exist only on synthetic runs.
+    assert set(evaluation.timing.model_dump(exclude_none=True).keys()) == {"e2e_ms"}
 
 
 def test_an_unmeasured_run_reads_as_unmeasured_and_not_as_instant():
