@@ -137,8 +137,17 @@ def test_models_list_parses_galileo_pm():
     # ModelId had no member for it, so `account.models()` raised on every call.
     with client(Recorder(ok(fixture("models")))) as c:
         listed = c.account.models()
-    assert [m.id.value for m in listed.data] == ["galileo-pm"]
-    assert [d.value for d in listed.data[0].detectors] == ["prompt_misalignment"]
+    pm = next(m for m in listed.data if m.id.value == "galileo-pm")
+    assert [d.value for d in pm.detectors] == ["prompt_misalignment"]
+
+
+def test_models_list_containing_galileo_parses():
+    # Internal accounts still see `galileo` on /v1/models (the fixture's captured
+    # entry). Model.id is EvaluationModelId, not the request-only ModelId, so
+    # that listing must parse rather than raise.
+    with client(Recorder(ok(fixture("models")))) as c:
+        listed = c.account.models()
+    assert [m.id.value for m in listed.data] == ["galileo", "galileo-pm"]
 
 
 def test_create_with_galileo_pm():

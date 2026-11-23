@@ -548,7 +548,10 @@ class Model(BaseModel):
     model_config = ConfigDict(
         extra='ignore',
     )
-    id: ModelId
+    id: EvaluationModelId
+    """
+    An API key on a customer plan sees `galileo-pm` only. Internal accounts also see `galileo`, so a client must not reject it.
+    """
     object: Literal['model']
     version: str | None
     """

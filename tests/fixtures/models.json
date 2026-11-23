@@ -17,6 +17,27 @@
   "default_build": null,
   "data": [
     {
+      "id": "galileo",
+      "object": "model",
+      "version": null,
+      "detectors": [
+        "visual_glitch",
+        "prompt_misalignment"
+      ],
+      "input": {
+        "formats": [
+          "video/mp4 (H.264/AVC)"
+        ],
+        "max_duration_sec": 15,
+        "max_file_bytes": 52428800,
+        "aspect_ratios": [
+          "16:9",
+          "9:16",
+          "1:1"
+        ]
+      }
+    },
+    {
       "id": "galileo-pm",
       "object": "model",
       "version": null,
