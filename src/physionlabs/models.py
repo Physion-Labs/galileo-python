@@ -11,11 +11,14 @@ from typing import Annotated, Any, Dict, Literal
 
 class ModelId(Enum):
     """
-    Galileo 1.0. The legacy name galileo remains accepted.
+    `galileo-1.0` (also accepted as `galileo`) checks visual glitches and, with a prompt, prompt alignment. Evaluations report it as `galileo`.
+
+    `galileo-pm` checks prompt alignment only. It requires a nonblank prompt, runs only `prompt_misalignment`, and refuses `visual_glitch` in `glitch_types` with `400 unsupported_glitch_type`. It has its own price (`PricingRates.per_second_per_run_by_model`) and its own concurrency allowance (`AccountLimits.max_concurrent_jobs_by_model`).
     """
 
     galileo_1_0 = 'galileo-1.0'
     galileo = 'galileo'
+    galileo_pm = 'galileo-pm'
 
 
 class GlitchType(Enum):
@@ -189,7 +192,7 @@ class EvaluationRequestInput(BaseModel):
     """
     prompt: str | None = None
     """
-    What the video was meant to show. Omit it for visual-glitch detection only. A nonblank prompt also enables prompt alignment by default. Up to 500 words (whitespace-delimited); no `maxLength` is declared because the limit is counted in words, not characters.
+    What the video was meant to show. Omit it for visual-glitch detection only. A nonblank prompt also enables prompt alignment by default. Required with `galileo-pm`, which checks prompt alignment only: a missing or blank prompt is refused with `400 missing_prompt`. Up to 500 words (whitespace-delimited); no `maxLength` is declared because the limit is counted in words, not characters.
     """
 
 
@@ -205,7 +208,7 @@ class EvaluationCreate(BaseModel):
     """
     glitch_types: list[GlitchType] | None = None
     """
-    Detectors to run. Defaults to those supported by the supplied prompt.
+    Detectors to run. Defaults to those supported by the supplied prompt and the chosen model. Only detectors the model runs are accepted (its `detectors` in `GET /v1/models`): `visual_glitch` with `galileo-pm` is refused with `400 unsupported_glitch_type`.
     """
     metadata: dict[str, Any] | None = None
     """
@@ -546,6 +549,9 @@ class Model(BaseModel):
     Null is the current answer for `galileo` and will stay so while it is the default: the version belongs to the cluster serving it, and answering from our side would mean publishing a number nobody checked. Nothing keys a run on this -- an evaluation carries its own `model_version`, taken from the submission that resolved it, and that is the one to read.
     """
     detectors: list[GlitchType]
+    """
+    The detectors this model runs, and so the values its `glitch_types` may take. `["visual_glitch", "prompt_misalignment"]` for `galileo`, `["prompt_misalignment"]` for `galileo-pm`.
+    """
     input: Input1
 
 
@@ -586,6 +592,10 @@ class PricingRates(BaseModel):
     per_second_per_run: float | None = None
     """
     What one second of clip costs for the whole analysis, whichever detectors run — 1 credit ($0.01) per second on the current card. The price of a run is this times the clip's duration rounded UP to a whole second, floored at `minimum`. Like `flat_per_run` it is the whole price: the per-detector fields and the cache multiplier stop applying. Check `flat_per_run` first, then this, and only then the per-detector fields.
+    """
+    per_second_per_run_by_model: dict[str, float] | None = None
+    """
+    Credits per second of clip for a model with a price of its own, keyed by model. When the run's model is listed here, this is the whole price and is checked before every other field: the clip's duration rounded to the nearest whole second (at least 1), times this rate, rounded up to a whole credit, never below 1 credit. `galileo-pm` is $0.04 per minute of clip (`0.04 * 100 / 60` credits per second), so any clip up to 15 seconds costs 1 credit ($0.01).
     """
 
 
@@ -646,6 +656,7 @@ class ErrorCode(Enum):
     prompt_too_long = 'prompt_too_long'
     prompt_refused = 'prompt_refused'
     invalid_glitch_types = 'invalid_glitch_types'
+    unsupported_glitch_type = 'unsupported_glitch_type'
     video_too_long = 'video_too_long'
     invalid_video = 'invalid_video'
     body_too_large = 'body_too_large'
@@ -771,6 +782,10 @@ class AccountLimits(BaseModel):
     requests_per_min: int
     window_sec: int
     max_concurrent_jobs: int
+    max_concurrent_jobs_by_model: dict[str, int] | None = None
+    """
+    Present when the deployment offers a model with a concurrency allowance of its own (`galileo-pm`). Lists each model's allowance; `galileo`'s equals `max_concurrent_jobs`. Runs on one model never count against another's allowance.
+    """
     rate_limits: RateLimits
 
 
