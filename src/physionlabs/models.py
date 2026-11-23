@@ -11,12 +11,19 @@ from typing import Annotated, Any, Dict, Literal
 
 class ModelId(Enum):
     """
-    `galileo-1.0` (also accepted as `galileo`) checks visual glitches and, with a prompt, prompt alignment. Evaluations report it as `galileo`.
+    The API model. `galileo-pm` checks prompt alignment only. It requires a nonblank prompt, runs only `prompt_misalignment`, and refuses `visual_glitch` in `glitch_types` with `400 unsupported_glitch_type`. It has its own price (`PricingRates.per_second_per_run_by_model`). Omitting `model` means `galileo-pm`.
 
-    `galileo-pm` checks prompt alignment only. It requires a nonblank prompt, runs only `prompt_misalignment`, and refuses `visual_glitch` in `glitch_types` with `400 unsupported_glitch_type`. It has its own price (`PricingRates.per_second_per_run_by_model`) and its own concurrency allowance (`AccountLimits.max_concurrent_jobs_by_model`).
+    `galileo-1.0` and `galileo` are not available on the API and are refused with `400 model_not_available` before anything is charged.
     """
 
-    galileo_1_0 = 'galileo-1.0'
+    galileo_pm = 'galileo-pm'
+
+
+class EvaluationModelId(Enum):
+    """
+    The model an evaluation ran. `galileo-pm` for every evaluation submitted with an API key since 2026-11-23; `galileo` appears on evaluations created earlier, or in the console.
+    """
+
     galileo = 'galileo'
     galileo_pm = 'galileo-pm'
 
@@ -523,7 +530,7 @@ class ModelBuild(BaseModel):
     version: str | None
     """
     The build the model runs, or NULL when that is not ours to state.
-    Null is the current answer for `galileo` and will stay so while it is the default: the version belongs to the cluster serving it, and answering from our side would mean publishing a number nobody checked. Nothing keys a run on this -- an evaluation carries its own `model_version`, taken from the submission that resolved it, and that is the one to read.
+    Null when the version belongs to the cluster serving the model: answering from our side would mean publishing a number nobody checked. Nothing keys a run on this -- an evaluation carries its own `model_version`, taken from the submission that resolved it, and that is the one to read.
     """
     note: str | None = None
 
@@ -541,16 +548,19 @@ class Model(BaseModel):
     model_config = ConfigDict(
         extra='ignore',
     )
-    id: ModelId
+    id: EvaluationModelId
+    """
+    An API key on a customer plan sees `galileo-pm` only. Internal accounts also see `galileo`, so a client must not reject it.
+    """
     object: Literal['model']
     version: str | None
     """
     The build the model runs, or NULL when that is not ours to state.
-    Null is the current answer for `galileo` and will stay so while it is the default: the version belongs to the cluster serving it, and answering from our side would mean publishing a number nobody checked. Nothing keys a run on this -- an evaluation carries its own `model_version`, taken from the submission that resolved it, and that is the one to read.
+    Null when the version belongs to the cluster serving the model: answering from our side would mean publishing a number nobody checked. Nothing keys a run on this -- an evaluation carries its own `model_version`, taken from the submission that resolved it, and that is the one to read.
     """
     detectors: list[GlitchType]
     """
-    The detectors this model runs, and so the values its `glitch_types` may take. `["visual_glitch", "prompt_misalignment"]` for `galileo`, `["prompt_misalignment"]` for `galileo-pm`.
+    The detectors this model runs, and so the values its `glitch_types` may take. `["prompt_misalignment"]` for `galileo-pm`.
     """
     input: Input1
 
@@ -657,6 +667,7 @@ class ErrorCode(Enum):
     prompt_refused = 'prompt_refused'
     invalid_glitch_types = 'invalid_glitch_types'
     unsupported_glitch_type = 'unsupported_glitch_type'
+    model_not_available = 'model_not_available'
     video_too_long = 'video_too_long'
     invalid_video = 'invalid_video'
     body_too_large = 'body_too_large'
@@ -710,7 +721,7 @@ class Evaluation(BaseModel):
     )
     id: str
     object: Literal['evaluation']
-    model: ModelId
+    model: EvaluationModelId
     model_version: str
     output_schema_version: str
     created: int
@@ -784,7 +795,7 @@ class AccountLimits(BaseModel):
     max_concurrent_jobs: int
     max_concurrent_jobs_by_model: dict[str, int] | None = None
     """
-    Present when the deployment offers a model with a concurrency allowance of its own (`galileo-pm`). Lists each model's allowance; `galileo`'s equals `max_concurrent_jobs`. Runs on one model never count against another's allowance.
+    Not returned to API keys, whose `max_concurrent_jobs` is already the `galileo-pm` allowance. Present for console sessions when the deployment offers more than one model with its own allowance.
     """
     rate_limits: RateLimits
 

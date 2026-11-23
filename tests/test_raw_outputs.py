@@ -20,14 +20,14 @@ def client(rec):
 
 
 def evaluation(status="completed"):
-    return {**fixture("evaluation_completed"), "status": status, "model": "galileo-1.0"}
+    return {**fixture("evaluation_completed"), "status": status, "model": "galileo-pm"}
 
 
 def test_create_fetches_raw_once_after_settling():
     ev_id = evaluation()["id"]
     rec = Recorder(ok(evaluation("queued")), ok(evaluation("processing")), ok(evaluation()), ok(RAW))
     with client(rec) as c:
-        ev = c.evaluations.create(model="galileo-1.0", input={"video": {"url": "https://x/a.mp4"}},
+        ev = c.evaluations.create(model="galileo-pm", input={"video": {"url": "https://x/a.mp4"}},
                                   output_raw=True)
     assert isinstance(ev, EvaluationWithRaw)
     assert ev.raw == RAW and ev.raw_pruned is False
