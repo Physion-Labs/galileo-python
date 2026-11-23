@@ -17,24 +17,20 @@
   "default_build": null,
   "data": [
     {
-      "id": "galileo",
+      "id": "galileo-pm",
       "object": "model",
       "version": null,
       "detectors": [
-        "visual_glitch",
         "prompt_misalignment"
       ],
       "input": {
         "formats": [
-          "video/mp4 (H.264/AVC)"
+          "video/mp4 (H.264 / H.265 (HEVC) / VP9)",
+          "video/quicktime (H.264 / H.265 (HEVC) / VP9)",
+          "video/webm (H.264 / H.265 (HEVC) / VP9)"
         ],
         "max_duration_sec": 15,
-        "max_file_bytes": 52428800,
-        "aspect_ratios": [
-          "16:9",
-          "9:16",
-          "1:1"
-        ]
+        "max_file_bytes": 52428800
       }
     }
   ]

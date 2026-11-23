@@ -8,15 +8,18 @@ assert os.environ.get("GALILEO_API_KEY"), "GALILEO_API_KEY is required"
 assert os.environ.get("GALILEO_TEST_VIDEO_URL"), "GALILEO_TEST_VIDEO_URL is required"
 with Client(base_url=os.environ["GALILEO_BASE_URL"]) as client:
     local = client.evaluations.create(
-        model="galileo-1.0",
-        input={"video": {"path": Path(__file__).resolve().parents[1] / "tests/fixtures/release.mp4"}},
+        model="galileo-pm",
+        input={
+            "video": {"path": Path(__file__).resolve().parents[1] / "tests/fixtures/release.mp4"},
+            "prompt": "A red background fills the frame.",
+        },
     )
     assert local.status.value == "completed", local.error
     assert local.result is not None
     print("Local file → automatic upload → create:", local.id, local.status.value)
 
     job = client.evaluations.submit(
-        model="galileo-1.0",
+        model="galileo-pm",
         input={
             "video": {"url": os.environ["GALILEO_TEST_VIDEO_URL"]},
             "prompt": "A red background fills the frame.",

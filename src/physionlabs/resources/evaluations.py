@@ -231,6 +231,10 @@ def _count_for(counts: EvaluationCounts, status: Sequence[str] | None) -> int:
     return sum(census.get(k, 0) for k in keys)
 
 
+# The API requires `model` on a submission, and API keys can use only this one.
+DEFAULT_MODEL = "galileo-pm"
+
+
 class LocalVideo(TypedDict):
     path: Union[str, Path]
 
@@ -266,14 +270,16 @@ class Evaluations(EvaluationResource):
     def submit(
         self,
         *,
-        model: str,
         input: EvaluationInput,
+        model: str = DEFAULT_MODEL,
         model_version: str | None = None,
         glitch_types: Sequence[str] | None = None,
         metadata: Mapping[str, Any] | None = None,
         upload_timeout: float = 600.0,
     ) -> Evaluation:
         """Upload a local video if needed, then submit without waiting for evaluation.
+
+        ``model`` defaults to ``galileo-pm``, the model the API offers to API keys.
 
         Local uploads must finish validation before submission. ``upload_timeout``
         bounds the validation wait; HTTP requests use the client's own timeout.
@@ -315,8 +321,8 @@ class Evaluations(EvaluationResource):
     def create(
         self,
         *,
-        model: str,
         input: EvaluationInput,
+        model: str = DEFAULT_MODEL,
         model_version: str | None = None,
         glitch_types: Sequence[str] | None = None,
         metadata: Mapping[str, Any] | None = None,
@@ -325,6 +331,8 @@ class Evaluations(EvaluationResource):
         output_raw: bool = False,
     ) -> Evaluation:
         """Upload, submit and wait for completed, partial or failed.
+
+        ``model`` defaults to ``galileo-pm``, the model the API offers to API keys.
 
         ``timeout`` bounds evaluation polling after submission. It does not
         include upload/validation time. A failed evaluation is returned for

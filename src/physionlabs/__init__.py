@@ -4,7 +4,7 @@
 
     client = Client()
     evaluation = client.evaluations.create(
-        model="galileo-1.0",
+        model="galileo-pm",
         input={
             "video": {"url": "https://cdn.example.com/red-ball.mp4"},
             "prompt": "A red ball rolls off a table and bounces twice.",
