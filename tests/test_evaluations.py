@@ -130,3 +130,29 @@ def test_malformed_input_fails_before_upload(input):
     with client(rec) as c, pytest.raises(ValueError):
         c.evaluations.create(model="galileo-1.0", input=input)
     assert not rec.calls
+
+
+def test_models_list_parses_galileo_pm():
+    # Prod lists `galileo-pm` beside `galileo`; rc8's ModelId had no member for
+    # it, so `account.models()` raised a validation error on every call.
+    models = fixture("models")
+    models["data"].append({
+        "id": "galileo-pm", "object": "model", "version": None,
+        "detectors": ["prompt_misalignment"],
+        "input": {"formats": ["video/mp4 (H.264 / H.265 (HEVC) / VP9)"],
+                  "max_duration_sec": 15, "max_file_bytes": 52428800},
+    })
+    with client(Recorder(ok(models))) as c:
+        listed = c.account.models()
+    pm = next(m for m in listed.data if m.id.value == "galileo-pm")
+    assert [d.value for d in pm.detectors] == ["prompt_misalignment"]
+
+
+def test_create_with_galileo_pm():
+    final = {**evaluation(), "model": "galileo-pm"}
+    rec = Recorder(ok({**final, "status": "queued"}), ok(final))
+    with client(rec) as c:
+        result = c.evaluations.create(model="galileo-pm", input={
+            "video": {"url": "https://example.com/v.mp4"}, "prompt": "A ball rolls."})
+    assert json.loads(rec.calls[0].content)["model"] == "galileo-pm"
+    assert result.model.value == "galileo-pm"
