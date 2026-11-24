@@ -179,3 +179,21 @@ def test_a_retired_model_is_refused_as_an_invalid_request():
             "video": {"url": "https://example.com/v.mp4"}, "prompt": "A ball rolls."})
     assert caught.value.code == "model_not_available"
     assert len(rec.calls) == 1
+
+
+def test_a_completed_galileo_pm_run_without_visual_glitch_fields_parses():
+    # Accounts without Galileo access get no visual-glitch fields at all:
+    # `summary.has_visual_glitch` is absent and only prompt_misalignment runs.
+    # rc10 required the key, so retrieve/wait raised on every completed run.
+    pm = next(g for g in fixture("evaluation_completed")["result"]["glitches"]
+              if g["type"] == "prompt_misalignment")
+    body = {**evaluation(), "model": "galileo-pm",
+            "detectors": [{"status": "completed", "detector": "prompt_misalignment"}],
+            "result": {"glitches": [pm, pm],
+                       "summary": {"num_glitches": 2, "has_prompt_misalignment": True}}}
+    with client(Recorder(ok(body))) as c:
+        ev = c.evaluations.retrieve(body["id"])
+    assert ev.result is not None
+    assert ev.result.summary.has_prompt_misalignment is True
+    assert ev.result.summary.has_visual_glitch is None
+    assert [d.detector.value for d in ev.detectors or []] == ["prompt_misalignment"]

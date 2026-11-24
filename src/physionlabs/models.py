@@ -13,7 +13,7 @@ class ModelId(Enum):
     """
     The API model. `galileo-pm` checks prompt alignment only. It requires a nonblank prompt, runs only `prompt_misalignment`, and refuses `visual_glitch` in `glitch_types` with `400 unsupported_glitch_type`. It has its own price (`PricingRates.per_second_per_run_by_model`). Omitting `model` means `galileo-pm`.
 
-    `galileo-1.0` and `galileo` are not available on the API and are refused with `400 model_not_available` before anything is charged.
+    `galileo-1.0` (and `galileo`), which adds visual-glitch detection, is available only to accounts with Galileo access, and is deliberately not in this enum: for every other account it is refused with `400 model_not_available` before anything is charged. An account with Galileo access may send it anyway, and `GET /v1/models` lists it for that account. An omitted `model` means `galileo-pm` for every account, with or without Galileo access.
     """
 
     galileo_pm = 'galileo-pm'
@@ -29,6 +29,10 @@ class EvaluationModelId(Enum):
 
 
 class GlitchType(Enum):
+    """
+    `visual_glitch` is available only to accounts with Galileo access. For every other account it is refused in `glitch_types` with `400 unsupported_glitch_type`, and never appears in a response.
+    """
+
     visual_glitch = 'visual_glitch'
     prompt_misalignment = 'prompt_misalignment'
 
@@ -215,7 +219,7 @@ class EvaluationCreate(BaseModel):
     """
     glitch_types: list[GlitchType] | None = None
     """
-    Detectors to run. Defaults to those supported by the supplied prompt and the chosen model. Only detectors the model runs are accepted (its `detectors` in `GET /v1/models`): `visual_glitch` with `galileo-pm` is refused with `400 unsupported_glitch_type`.
+    Detectors to run. Defaults to those supported by the supplied prompt and the chosen model. Only detectors the model runs are accepted (its `detectors` in `GET /v1/models`): `visual_glitch` with `galileo-pm`, or from an account without Galileo access, is refused with `400 unsupported_glitch_type`.
     """
     metadata: dict[str, Any] | None = None
     """
@@ -326,6 +330,10 @@ class GlitchSource(Enum):
 
 
 class VisualGlitch(BaseModel):
+    """
+    A visual-glitch finding. Returned only to accounts with Galileo access, on evaluations that ran `galileo`.
+    """
+
     model_config = ConfigDict(
         extra='ignore',
     )
@@ -366,13 +374,18 @@ class EvaluationSummary(BaseModel):
     Counts over the findings this run REPORTED. `false` means "this detector reported nothing", which is not the same as "this detector found nothing": a run submitted without a prompt does not run `prompt_misalignment` at all, and reports `has_prompt_misalignment: false` exactly as a run that checked and found the prompt fully delivered does.
 
     `detectors[]` is the field that tells those apart, and is the one to read before presenting either as a verdict. These two booleans are kept as required non-nullable for compatibility — every existing consumer reads them as plain booleans — rather than growing a third state here.
+
+    `has_visual_glitch` is present only for accounts with Galileo access. For every other account it is absent, `num_glitches` counts the findings that are returned, and evaluations created earlier with `galileo` read back without their visual-glitch findings.
     """
 
     model_config = ConfigDict(
         extra='ignore',
     )
     num_glitches: int
-    has_visual_glitch: bool
+    has_visual_glitch: bool | None = None
+    """
+    Present only for accounts with Galileo access.
+    """
     has_prompt_misalignment: bool
 
 
@@ -550,7 +563,7 @@ class Model(BaseModel):
     )
     id: EvaluationModelId
     """
-    An API key on a customer plan sees `galileo-pm` only. Internal accounts also see `galileo`, so a client must not reject it.
+    An account without Galileo access sees `galileo-pm` only. Accounts with Galileo access also see `galileo`, so a client must not reject it.
     """
     object: Literal['model']
     version: str | None
